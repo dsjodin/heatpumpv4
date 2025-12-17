@@ -3,8 +3,9 @@ IVT Provider Implementation
 Provider for IVT Greenline heat pumps with Rego 600/637 controllers
 """
 
-from typing import Dict, Any
-from ..base import HeatPumpProvider
+from typing import Dict, Any, Optional
+
+from providers.base import HeatPumpProvider
 from .registers import IVT_REGISTERS
 from .alarms import IVT_ALARM_CODES
 
@@ -104,7 +105,7 @@ class IVTProvider(HeatPumpProvider):
         """IVT has hot gas sensor"""
         return True
 
-    def get_hot_gas_register(self) -> str:
+    def get_hot_gas_register(self) -> Optional[str]:
         """Return hot gas sensor register"""
         return '000B'
 
@@ -112,7 +113,7 @@ class IVTProvider(HeatPumpProvider):
         """IVT supports holiday mode"""
         return True
 
-    def get_holiday_mode_register(self) -> str:
+    def get_holiday_mode_register(self) -> Optional[str]:
         """Return holiday mode register"""
         return '2210'
 
@@ -120,7 +121,7 @@ class IVTProvider(HeatPumpProvider):
         """IVT supports summer mode"""
         return True
 
-    def get_summer_mode_register(self) -> str:
+    def get_summer_mode_register(self) -> Optional[str]:
         """Return summer mode temperature setting register"""
         return '020A'
 
@@ -128,7 +129,7 @@ class IVTProvider(HeatPumpProvider):
         """IVT supports extra hot water mode"""
         return True
 
-    def get_extra_hot_water_register(self) -> str:
+    def get_extra_hot_water_register(self) -> Optional[str]:
         """Return extra hot water timer register"""
         return '7209'
 
@@ -136,7 +137,7 @@ class IVTProvider(HeatPumpProvider):
         """IVT supports alarm reset via register"""
         return True
 
-    def get_alarm_reset_register(self) -> str:
+    def get_alarm_reset_register(self) -> Optional[str]:
         """Return alarm reset register"""
         return '12F2'
 

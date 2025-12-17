@@ -3,8 +3,9 @@ Thermia Provider Implementation
 Provider for Thermia Diplomat heat pumps
 """
 
-from typing import Dict, Any
-from ..base import HeatPumpProvider
+from typing import Dict, Any, Optional
+
+from providers.base import HeatPumpProvider
 from .registers import THERMIA_REGISTERS
 from .alarms import THERMIA_ALARM_CODES
 
@@ -77,7 +78,7 @@ class ThermiaProvider(HeatPumpProvider):
         """Thermia has operating mode selection"""
         return True
 
-    def get_operating_mode_register(self) -> str:
+    def get_operating_mode_register(self) -> Optional[str]:
         """Return operating mode register"""
         return '2201'
 
