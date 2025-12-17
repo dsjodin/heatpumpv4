@@ -1,0 +1,647 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>{{ dashboard_title }} - Mobil</title>
+
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+    <!-- Socket.IO -->
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+
+    <style>
+        :root {
+            --color-hot: #ff6b6b;
+            --color-warm: #ff8c42;
+            --color-cold: #4dabf7;
+            --color-success: #51cf66;
+            --color-warning: #ffd43b;
+            --color-danger: #ff6b6b;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            min-height: 100vh;
+            padding-bottom: 80px;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        /* Header */
+        .mobile-header {
+            background: linear-gradient(135deg, #ff6b6b 0%, #ff8c42 100%);
+            color: white;
+            padding: 12px 16px;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+        }
+
+        .mobile-header h1 {
+            font-size: 1.2rem;
+            margin: 0;
+            font-weight: 600;
+        }
+
+        .connection-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            display: inline-block;
+            margin-right: 6px;
+        }
+
+        .connection-dot.connected {
+            background: #51cf66;
+            box-shadow: 0 0 6px #51cf66;
+        }
+
+        .connection-dot.disconnected {
+            background: #ff6b6b;
+        }
+
+        /* Main content */
+        .mobile-content {
+            padding: 12px;
+        }
+
+        /* Status Cards Grid */
+        .status-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin-bottom: 16px;
+        }
+
+        .status-card {
+            background: white;
+            border-radius: 12px;
+            padding: 14px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+            text-align: center;
+        }
+
+        .status-card.full-width {
+            grid-column: 1 / -1;
+        }
+
+        .status-card .icon {
+            font-size: 1.5rem;
+            margin-bottom: 4px;
+        }
+
+        .status-card .label {
+            font-size: 0.75rem;
+            color: #666;
+            margin-bottom: 2px;
+        }
+
+        .status-card .value {
+            font-size: 1.8rem;
+            font-weight: 700;
+            color: #212529;
+            line-height: 1.1;
+        }
+
+        .status-card .value.small {
+            font-size: 1.4rem;
+        }
+
+        .status-card .unit {
+            font-size: 0.9rem;
+            font-weight: 400;
+            color: #666;
+        }
+
+        .status-card .minmax {
+            font-size: 0.7rem;
+            color: #868e96;
+            margin-top: 4px;
+        }
+
+        /* Temperature colors */
+        .temp-outdoor .icon { color: #74c0fc; }
+        .temp-radiator .icon { color: #ff6b6b; }
+        .temp-hotwater .icon { color: var(--color-hot); }
+        .temp-brine .icon { color: #339af0; }
+
+        /* COP Card */
+        .cop-card {
+            background: linear-gradient(135deg, #51cf66 0%, #40c057 100%);
+            color: white;
+        }
+
+        .cop-card .label {
+            color: rgba(255,255,255,0.85);
+        }
+
+        .cop-card .value {
+            color: white;
+        }
+
+        /* Power Card */
+        .power-card .icon {
+            color: #ffd43b;
+        }
+
+        /* System Status Section */
+        .system-status {
+            background: white;
+            border-radius: 12px;
+            padding: 14px;
+            margin-bottom: 16px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+        }
+
+        .system-status h2 {
+            font-size: 0.9rem;
+            color: #666;
+            margin-bottom: 12px;
+            font-weight: 600;
+        }
+
+        .status-badges {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .status-badge {
+            padding: 8px 14px;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .status-badge i {
+            font-size: 0.9rem;
+        }
+
+        .status-badge.on {
+            background: #51cf66;
+            color: white;
+        }
+
+        .status-badge.off {
+            background: #e9ecef;
+            color: #666;
+        }
+
+        .status-badge.alarm {
+            background: #ff6b6b;
+            color: white;
+            animation: pulse-alarm 1.5s infinite;
+        }
+
+        @keyframes pulse-alarm {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.7; }
+        }
+
+        /* Alarm Banner */
+        .alarm-banner {
+            background: linear-gradient(135deg, #ff6b6b 0%, #fa5252 100%);
+            color: white;
+            padding: 14px;
+            border-radius: 12px;
+            margin-bottom: 16px;
+            display: none;
+        }
+
+        .alarm-banner.active {
+            display: block;
+            animation: pulse-alarm 2s infinite;
+        }
+
+        .alarm-banner h3 {
+            font-size: 1rem;
+            margin: 0 0 6px 0;
+            font-weight: 700;
+        }
+
+        .alarm-banner p {
+            margin: 0;
+            font-size: 0.85rem;
+            opacity: 0.95;
+        }
+
+        /* Controls */
+        .mobile-controls {
+            background: white;
+            border-radius: 12px;
+            padding: 14px;
+            margin-bottom: 16px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+        }
+
+        .mobile-controls label {
+            font-size: 0.8rem;
+            color: #666;
+            font-weight: 600;
+            margin-bottom: 6px;
+            display: block;
+        }
+
+        .mobile-controls select {
+            width: 100%;
+            padding: 12px;
+            border-radius: 8px;
+            border: 1px solid #dee2e6;
+            font-size: 1rem;
+            background: white;
+        }
+
+        .btn-refresh {
+            width: 100%;
+            padding: 14px;
+            margin-top: 12px;
+            border-radius: 8px;
+            border: none;
+            background: linear-gradient(135deg, #ff6b6b 0%, #ff8c42 100%);
+            color: white;
+            font-weight: 600;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: transform 0.1s;
+        }
+
+        .btn-refresh:active {
+            transform: scale(0.98);
+        }
+
+        /* Last update */
+        .last-update {
+            text-align: center;
+            color: #868e96;
+            font-size: 0.75rem;
+            margin-top: 16px;
+        }
+
+        /* Bottom nav link */
+        .desktop-link {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: white;
+            padding: 16px;
+            text-align: center;
+            box-shadow: 0 -2px 8px rgba(0,0,0,0.1);
+            z-index: 100;
+        }
+
+        .desktop-link a {
+            color: #339af0;
+            text-decoration: none;
+            font-size: 0.9rem;
+            font-weight: 500;
+        }
+
+        /* Loading state */
+        .loading {
+            opacity: 0.5;
+        }
+
+        /* Valve mode indicator */
+        .valve-mode {
+            font-size: 0.75rem;
+            padding: 4px 10px;
+            border-radius: 12px;
+            background: #e9ecef;
+            color: #495057;
+            display: inline-block;
+            margin-top: 6px;
+        }
+
+        .valve-mode.radiator {
+            background: #ffe3e3;
+            color: #c92a2a;
+        }
+
+        .valve-mode.hotwater {
+            background: #d3f9d8;
+            color: #2b8a3e;
+        }
+    </style>
+</head>
+<body>
+    <!-- Header -->
+    <header class="mobile-header">
+        <div class="d-flex justify-content-between align-items-center">
+            <h1><i class="fas fa-fire me-2"></i>{{ brand_name }}</h1>
+            <div>
+                <span class="connection-dot disconnected" id="connection-dot"></span>
+                <span class="small" id="connection-text">Ansluter...</span>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="mobile-content">
+        <!-- Alarm Banner (hidden by default) -->
+        <div class="alarm-banner" id="alarm-banner">
+            <h3><i class="fas fa-exclamation-triangle me-2"></i>LARM AKTIVT</h3>
+            <p id="alarm-description">--</p>
+        </div>
+
+        <!-- Temperature Cards -->
+        <div class="status-grid">
+            <div class="status-card temp-outdoor">
+                <div class="icon"><i class="fas fa-cloud-sun"></i></div>
+                <div class="label">Utomhus</div>
+                <div class="value" id="temp-outdoor">--<span class="unit">°C</span></div>
+                <div class="minmax" id="temp-outdoor-minmax">--</div>
+            </div>
+
+            <div class="status-card temp-radiator">
+                <div class="icon"><i class="fas fa-temperature-arrow-up"></i></div>
+                <div class="label">Radiator Fram/Retur</div>
+                <div class="value small" id="temp-radiator">--/--<span class="unit">°C</span></div>
+                <div class="minmax" id="temp-radiator-minmax">--</div>
+            </div>
+
+            <div class="status-card temp-hotwater">
+                <div class="icon"><i class="fas fa-shower"></i></div>
+                <div class="label">Varmvatten</div>
+                <div class="value" id="temp-hotwater">--<span class="unit">°C</span></div>
+                <div class="minmax" id="temp-hotwater-minmax">--</div>
+            </div>
+
+            <div class="status-card cop-card">
+                <div class="icon"><i class="fas fa-chart-line"></i></div>
+                <div class="label">COP (Varmefaktor)</div>
+                <div class="value" id="cop-value">--</div>
+            </div>
+
+            <div class="status-card power-card">
+                <div class="icon"><i class="fas fa-bolt"></i></div>
+                <div class="label">Effekt</div>
+                <div class="value small" id="power-value">--<span class="unit">W</span></div>
+            </div>
+
+            <div class="status-card temp-brine">
+                <div class="icon"><i class="fas fa-snowflake"></i></div>
+                <div class="label">Koldbärare In/Ut</div>
+                <div class="value small" id="brine-temps">--/--<span class="unit">°C</span></div>
+            </div>
+        </div>
+
+        <!-- System Status -->
+        <div class="system-status">
+            <h2><i class="fas fa-cogs me-2"></i>Systemstatus</h2>
+            <div class="status-badges">
+                <span class="status-badge off" id="badge-compressor">
+                    <i class="fas fa-cog"></i> Kompressor
+                </span>
+                <span class="status-badge off" id="badge-brine-pump">
+                    <i class="fas fa-sync"></i> KB-pump
+                </span>
+                <span class="status-badge off" id="badge-radiator-pump">
+                    <i class="fas fa-sync"></i> VV-pump
+                </span>
+                <span class="status-badge off" id="badge-aux">
+                    <i class="fas fa-fire"></i> Tillsats
+                </span>
+            </div>
+            <div class="text-center mt-2">
+                <span class="valve-mode" id="valve-mode">Väntar...</span>
+            </div>
+        </div>
+
+        <!-- Controls -->
+        <div class="mobile-controls">
+            <label for="time-range"><i class="fas fa-clock me-1"></i>Tidsperiod</label>
+            <select id="time-range">
+                <option value="1h">Senaste timmen</option>
+                <option value="6h">Senaste 6 timmar</option>
+                <option value="24h" selected>Senaste 24 timmar</option>
+                <option value="7d">Senaste veckan</option>
+                <option value="30d">Senaste manaden</option>
+            </select>
+            <button class="btn-refresh" id="btn-refresh">
+                <i class="fas fa-sync-alt me-2"></i>Uppdatera nu
+            </button>
+        </div>
+
+        <!-- Last Update -->
+        <div class="last-update">
+            <i class="fas fa-clock me-1"></i>
+            <span id="last-update">Vantar pa data...</span>
+        </div>
+    </main>
+
+    <!-- Desktop Link -->
+    <div class="desktop-link">
+        <a href="/"><i class="fas fa-desktop me-1"></i>Visa fullstandig dashboard</a>
+    </div>
+
+    <script>
+        // Mobile-optimized Socket.IO client
+        let currentTimeRange = '24h';
+        let connected = false;
+
+        // Connect to WebSocket
+        const socket = io(window.location.origin, {
+            reconnection: true,
+            reconnectionDelay: 1000,
+            reconnectionAttempts: 10,
+            timeout: 10000
+        });
+
+        // Connection handlers
+        socket.on('connect', () => {
+            console.log('Connected');
+            connected = true;
+            updateConnectionStatus(true);
+            loadInitialData(currentTimeRange);
+        });
+
+        socket.on('disconnect', () => {
+            console.log('Disconnected');
+            connected = false;
+            updateConnectionStatus(false);
+        });
+
+        socket.on('connect_error', (error) => {
+            console.error('Connection error:', error);
+            updateConnectionStatus(false);
+        });
+
+        // Data update handler
+        socket.on('graph_update', (data) => {
+            console.log('Received update');
+            updateMobileUI(data);
+        });
+
+        // Load initial data via HTTP
+        async function loadInitialData(timeRange) {
+            try {
+                document.body.classList.add('loading');
+                const response = await fetch(`/api/initial-data?range=${timeRange}`);
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                const data = await response.json();
+                updateMobileUI(data);
+            } catch (error) {
+                console.error('Failed to load data:', error);
+            } finally {
+                document.body.classList.remove('loading');
+            }
+        }
+
+        // Update UI with data
+        function updateMobileUI(data) {
+            if (!data.status || !data.status.current) return;
+
+            const current = data.status.current;
+
+            // Update temperatures
+            updateTemp('temp-outdoor', current.outdoor_temp);
+            updateTemp('temp-hotwater', current.hot_water);
+
+            // Radiator temps (forward/return)
+            if (current.radiator_forward && current.radiator_return) {
+                const radFwd = current.radiator_forward.current !== null ? current.radiator_forward.current.toFixed(1) : '--';
+                const radRet = current.radiator_return.current !== null ? current.radiator_return.current.toFixed(1) : '--';
+                document.getElementById('temp-radiator').innerHTML = `${radFwd}/${radRet}<span class="unit">°C</span>`;
+
+                // Min/avg/max for radiator
+                const minmaxEl = document.getElementById('temp-radiator-minmax');
+                if (current.radiator_forward.min !== null && current.radiator_forward.max !== null) {
+                    const avgText = current.radiator_forward.avg !== null ? ` Snitt: ${current.radiator_forward.avg.toFixed(0)}°` : '';
+                    minmaxEl.textContent = `Fram: ${current.radiator_forward.min.toFixed(0)}°-${current.radiator_forward.max.toFixed(0)}°${avgText}`;
+                }
+            }
+
+            // Brine temps
+            if (current.brine_in && current.brine_out) {
+                const brineIn = current.brine_in.current !== null ? current.brine_in.current.toFixed(1) : '--';
+                const brineOut = current.brine_out.current !== null ? current.brine_out.current.toFixed(1) : '--';
+                document.getElementById('brine-temps').innerHTML = `${brineIn}/${brineOut}<span class="unit">°C</span>`;
+            }
+
+            // COP
+            const copEl = document.getElementById('cop-value');
+            if (current.current_cop !== null && current.current_cop !== undefined && !isNaN(current.current_cop)) {
+                copEl.textContent = current.current_cop.toFixed(2);
+            } else {
+                copEl.textContent = '--';
+            }
+
+            // Power
+            const powerEl = document.getElementById('power-value');
+            if (current.power !== null) {
+                powerEl.innerHTML = `${Math.round(current.power)}<span class="unit">W</span>`;
+            }
+
+            // System status badges
+            updateBadge('badge-compressor', current.compressor_running);
+            updateBadge('badge-brine-pump', current.brine_pump_running);
+            updateBadge('badge-radiator-pump', current.radiator_pump_running);
+            updateBadge('badge-aux', current.aux_heater);
+
+            // Valve mode
+            const valveEl = document.getElementById('valve-mode');
+            if (current.switch_valve_status !== undefined) {
+                if (current.switch_valve_status === 0) {
+                    valveEl.textContent = 'Radiatorlage';
+                    valveEl.className = 'valve-mode radiator';
+                } else {
+                    valveEl.textContent = 'Varmvattenlage';
+                    valveEl.className = 'valve-mode hotwater';
+                }
+            }
+
+            // Alarm status
+            const alarmBanner = document.getElementById('alarm-banner');
+            if (data.status.alarm && data.status.alarm.is_active) {
+                alarmBanner.classList.add('active');
+                document.getElementById('alarm-description').textContent =
+                    `Larmkod ${data.status.alarm.code || 'N/A'}: ${data.status.alarm.description || 'Okand'}`;
+            } else {
+                alarmBanner.classList.remove('active');
+            }
+
+            // Last update time
+            document.getElementById('last-update').textContent =
+                `Uppdaterad: ${new Date().toLocaleTimeString('sv-SE')}`;
+        }
+
+        function updateTemp(elementId, tempData) {
+            const el = document.getElementById(elementId);
+            const minmaxEl = document.getElementById(elementId + '-minmax');
+
+            if (!tempData) return;
+
+            if (tempData.current !== null) {
+                el.innerHTML = `${tempData.current.toFixed(1)}<span class="unit">°C</span>`;
+            }
+
+            if (minmaxEl && tempData.min !== null && tempData.max !== null) {
+                const avgText = tempData.avg !== null ? ` | Snitt: ${tempData.avg.toFixed(1)}°` : '';
+                minmaxEl.textContent = `Min: ${tempData.min.toFixed(1)}° | Max: ${tempData.max.toFixed(1)}°${avgText}`;
+            }
+        }
+
+        function updateBadge(elementId, isOn) {
+            const badge = document.getElementById(elementId);
+            if (isOn) {
+                badge.classList.remove('off');
+                badge.classList.add('on');
+            } else {
+                badge.classList.remove('on');
+                badge.classList.add('off');
+            }
+        }
+
+        function updateConnectionStatus(isConnected) {
+            const dot = document.getElementById('connection-dot');
+            const text = document.getElementById('connection-text');
+
+            if (isConnected) {
+                dot.classList.remove('disconnected');
+                dot.classList.add('connected');
+                text.textContent = 'Ansluten';
+            } else {
+                dot.classList.remove('connected');
+                dot.classList.add('disconnected');
+                text.textContent = 'Frankopplad';
+            }
+        }
+
+        // Event listeners
+        document.addEventListener('DOMContentLoaded', () => {
+            // Time range change
+            document.getElementById('time-range').addEventListener('change', (e) => {
+                currentTimeRange = e.target.value;
+                if (connected) {
+                    socket.emit('change_time_range', { range: currentTimeRange });
+                } else {
+                    loadInitialData(currentTimeRange);
+                }
+            });
+
+            // Refresh button
+            document.getElementById('btn-refresh').addEventListener('click', () => {
+                if (connected) {
+                    socket.emit('request_update', { range: currentTimeRange });
+                } else {
+                    loadInitialData(currentTimeRange);
+                }
+            });
+        });
+    </script>
+</body>
+</html>

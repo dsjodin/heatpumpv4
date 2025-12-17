@@ -1,0 +1,297 @@
+# Thermia Diplomat Pump Profile
+# Compatible with: Diplomat Optimum G3, Atlas, Atria, Robust models
+# Reference: https://online.husdata.se/h-docs/C60.pdf
+
+metadata:
+  brand: "Thermia"
+  model: "Diplomat / Optimum / Atlas / Atria / Robust"
+  controller: "H66 Gateway"
+  documentation: "https://online.husdata.se/h-docs/C60.pdf"
+  supports_power_measurement: true
+  supports_energy_measurement: true
+
+registers:
+  # ==================== TEMPERATURES ====================
+  "0001":
+    logical_name: "radiator_return"
+    name: "radiator_return"
+    unit: "°C"
+    type: "temperature"
+    description: "Radiator return temperature (from radiators)"
+  
+  "0002":
+    logical_name: "radiator_forward"
+    name: "radiator_forward"
+    unit: "°C"
+    type: "temperature"
+    description: "Radiator forward temperature (to radiators)"
+  
+  "0005":
+    logical_name: "brine_in_evaporator"
+    name: "brine_in_evaporator"
+    unit: "°C"
+    type: "temperature"
+    description: "Brine in/Evaporator temp (from ground for LW, evaporator for AW/EW)"
+  
+  "0006":
+    logical_name: "brine_out_condenser"
+    name: "brine_out_condenser"
+    unit: "°C"
+    type: "temperature"
+    description: "Brine out/Condenser temp (to ground for LW, condenser for AW/EW)"
+  
+  "0007":
+    logical_name: "outdoor_temp"
+    name: "outdoor_temp"
+    unit: "°C"
+    type: "temperature"
+    description: "Outdoor temperature sensor"
+  
+  "0008":
+    logical_name: "indoor_temp"
+    name: "indoor_temp"
+    unit: "°C"
+    type: "temperature"
+    description: "Indoor temperature (cable connected sensor if installed)"
+  
+  "0009":
+    logical_name: "hot_water_top"
+    name: "hot_water_top"
+    unit: "°C"
+    type: "temperature"
+    description: "Hot water tank top sensor"
+  
+  "0012":
+    logical_name: "pressure_tube_temp"
+    name: "pressure_tube_temp"
+    unit: "°C"
+    type: "temperature"
+    description: "Temperature after compressor before expansion valve"
+  
+  "0013":
+    logical_name: "cooling_temp"
+    name: "cooling_temp"
+    unit: "°C"
+    type: "temperature"
+    description: "Cooling circuit temperature (if installed)"
+  
+  "0107":
+    logical_name: "heating_setpoint"
+    name: "heating_setpoint"
+    unit: "°C"
+    type: "temperature"
+    description: "Target temperature for heating"
+  
+  # ==================== PUMP SPEEDS ====================
+  "3109":
+    logical_name: "circulation_pump_speed"
+    name: "circulation_pump_speed"
+    unit: "%"
+    type: "percentage"
+    description: "Variable speed for circulation pump"
+  
+  "3110":
+    logical_name: "brine_pump_speed"
+    name: "brine_pump_speed"
+    unit: "%"
+    type: "percentage"
+    description: "Variable speed for ground source brine pump (LW only)"
+  
+  # ==================== STATUS ====================
+  "1A01":
+    logical_name: "compressor_status"
+    name: "compressor_status"
+    unit: ""
+    type: "status"
+    description: "Compressor on/off status"
+  
+  "1A04":
+    logical_name: "brine_pump_status"
+    name: "brine_pump_status"
+    unit: ""
+    type: "status"
+    description: "Ground source brine pump status (LW only)"
+  
+  "1A06":
+    logical_name: "radiator_pump_status"
+    name: "radiator_pump_status"
+    unit: ""
+    type: "status"
+    description: "Radiator circulation pump status"
+  
+  "1A07":
+    logical_name: "switch_valve_status"
+    name: "switch_valve_status"
+    unit: ""
+    type: "status"
+    description: "Switch valve position (0=radiator heating, 1=hot water heating)"
+  
+  # ==================== ADDITIONAL HEAT ====================
+  "3104":
+    logical_name: "additional_heat_percent"
+    name: "additional_heat_percent"
+    unit: "%"
+    type: "percentage"
+    description: "Additional electrical heater percentage (typically 9kW max)"
+  
+  # ==================== ALARMS ====================
+  "1A20":
+    logical_name: "alarm_status"
+    name: "alarm_status"
+    unit: ""
+    type: "alarm"
+    description: "Pump alarm status (0=OK, 1=Alarming)"
+  
+  "2A91":
+    logical_name: "alarm_code"
+    name: "alarm_code"
+    unit: ""
+    type: "alarm"
+    description: "Active alarm code"
+  
+  # ==================== SETTINGS ====================
+  "2201":
+    logical_name: "operating_mode"
+    name: "operating_mode"
+    unit: ""
+    type: "setting"
+    description: "Operational mode (0=All off, 1=Auto, 2=Normal, 3=Add heat only, 4=Hot water only)"
+  
+  "0203":
+    logical_name: "room_temp_setpoint"
+    name: "room_temp_setpoint"
+    unit: "°C"
+    type: "temperature"
+    description: "Room temperature setpoint (if indoor sensor installed)"
+  
+  "2204":
+    logical_name: "room_sensor_influence"
+    name: "room_sensor_influence"
+    unit: "°C"
+    type: "setting"
+    description: "How much room temp should influence heating"
+  
+  "0205":
+    logical_name: "heat_curve_L"
+    name: "heat_curve_L"
+    unit: "°C"
+    type: "setting"
+    description: "Heat curve setting (CurveL base point)"
+  
+  "0206":
+    logical_name: "heat_curve_R"
+    name: "heat_curve_R"
+    unit: "°C"
+    type: "setting"
+    description: "Heat curve MAX setting (CurveR)"
+  
+  "0208":
+    logical_name: "hot_water_stop_temp"
+    name: "hot_water_stop_temp"
+    unit: "°C"
+    type: "temperature"
+    description: "Hot water highest temperature setpoint"
+  
+  "0211":
+    logical_name: "heating_stop_temp"
+    name: "heating_stop_temp"
+    unit: "°C"
+    type: "temperature"
+    description: "Heating stop temperature setpoint"
+  
+  "0212":
+    logical_name: "hot_water_start_temp"
+    name: "hot_water_start_temp"
+    unit: "°C"
+    type: "temperature"
+    description: "Hot water lowest temperature setpoint"
+  
+  "0214":
+    logical_name: "cooling_setpoint"
+    name: "cooling_setpoint"
+    unit: "°C"
+    type: "temperature"
+    description: "Cooling temperature level (if installed)"
+  
+  "0217":
+    logical_name: "outdoor_temp_offset"
+    name: "outdoor_temp_offset"
+    unit: "°C"
+    type: "temperature"
+    description: "Outdoor temperature offset adjustment"
+  
+  "0233":
+    logical_name: "external_control"
+    name: "external_control"
+    unit: "°C"
+    type: "setting"
+    description: "Temperature reduction when EVU input has 10kOhm"
+  
+  "8105":
+    logical_name: "degree_minutes"
+    name: "degree_minutes"
+    unit: ""
+    type: "setting"
+    description: "Regulation delay variable (integral)"
+  
+  # ==================== RUNTIME COUNTERS ====================
+  "6C60":
+    logical_name: "compressor_runtime"
+    name: "compressor_runtime"
+    unit: "hours"
+    type: "runtime"
+    description: "Compressor total runtime hours"
+  
+  "6C63":
+    logical_name: "aux_heater_3kw_runtime"
+    name: "aux_heater_3kw_runtime"
+    unit: "hours"
+    type: "runtime"
+    description: "3kW electrical heater total runtime"
+  
+  "6C64":
+    logical_name: "hot_water_runtime"
+    name: "hot_water_runtime"
+    unit: "hours"
+    type: "runtime"
+    description: "Total time producing hot water"
+  
+  "6C66":
+    logical_name: "aux_heater_6kw_runtime"
+    name: "aux_heater_6kw_runtime"
+    unit: "hours"
+    type: "runtime"
+    description: "6kW electrical heater total runtime"
+  
+  # ==================== POWER & ENERGY (H66 Calculated) ====================
+  "CFAA":
+    logical_name: "power_consumption"
+    name: "power_consumption"
+    unit: "W"
+    type: "power"
+    description: "Current power consumption (H66 calculated)"
+  
+  "5FAB":
+    logical_name: "energy_accumulated"
+    name: "energy_accumulated"
+    unit: "kWh"
+    type: "energy"
+    description: "Accumulated energy consumption (H66 calculated)"
+
+# Thermia alarm codes
+alarm_codes:
+  0: "Inget larm"
+  10: "HP - Högtryckspressostat"
+  11: "LP - Lågtryckspressostat"
+  12: "MP - Motorskydd kompressor"
+  13: "Frys - Frysvakt"
+  14: "LP2 - Lågtryck nivå 2"
+  20: "Flow - Flödesvakt köldbärare"
+  21: "Flow2 - Flödesvakt radiator"
+  30: "Sensor - Temperatursensor fel"
+  31: "Sensor2 - Flera sensorer fel"
+  40: "Kommunikation - Styrkortsfel"
+  50: "Hetgas - För hög hetgastemperatur"
+  60: "Extern - Externt larm"
+  70: "Service - Service krävs"
+  80: "Info - Information"

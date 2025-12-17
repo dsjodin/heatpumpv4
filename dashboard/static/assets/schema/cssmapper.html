@@ -1,0 +1,1534 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CSS Overlay Mapper</title>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: #1a1a2e;
+            color: #eee;
+            min-height: 100vh;
+        }
+
+        h1 {
+            text-align: center;
+            color: #00d4ff;
+            margin-bottom: 20px;
+        }
+
+        .container {
+            display: flex;
+            gap: 20px;
+            max-width: 1600px;
+            margin: 0 auto;
+        }
+
+        .sidebar {
+            width: 280px;
+            flex-shrink: 0;
+        }
+
+        .panel {
+            background: #16213e;
+            border-radius: 10px;
+            padding: 15px;
+            margin-bottom: 15px;
+        }
+
+        .panel h3 {
+            margin: 0 0 15px 0;
+            color: #00d4ff;
+            font-size: 14px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .background-selector {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .background-selector label {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px;
+            background: #1a1a2e;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .background-selector label:hover {
+            background: #0f3460;
+        }
+
+        .background-selector input[type="radio"] {
+            accent-color: #00d4ff;
+        }
+
+        .overlay-list {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+
+        .overlay-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 10px;
+            background: #1a1a2e;
+            border-radius: 6px;
+            cursor: grab;
+            transition: all 0.2s;
+            font-size: 13px;
+        }
+
+        .overlay-item:hover {
+            background: #0f3460;
+        }
+
+        .overlay-item.dragging {
+            opacity: 0.5;
+        }
+
+        .overlay-thumb {
+            width: 40px;
+            height: 40px;
+            object-fit: contain;
+            background: #333;
+            border-radius: 4px;
+        }
+
+        .main-area {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .canvas-container {
+            position: relative;
+            background: #16213e;
+            border-radius: 10px;
+            padding: 20px;
+            overflow: auto;
+        }
+
+        .canvas-wrapper {
+            position: relative;
+            display: inline-block;
+            border: 2px dashed #0f3460;
+        }
+
+        #background-image {
+            display: block;
+            max-width: 100%;
+        }
+
+        .overlay {
+            position: absolute;
+            cursor: move;
+            border: 2px solid transparent;
+            transition: border-color 0.2s;
+        }
+
+        .overlay:hover, .overlay.selected {
+            border-color: #00d4ff;
+        }
+
+        .overlay img {
+            display: block;
+            max-width: none;
+            transform-origin: top left;
+        }
+
+        .overlay .resize-handle {
+            position: absolute;
+            bottom: -6px;
+            right: -6px;
+            width: 12px;
+            height: 12px;
+            background: #00d4ff;
+            border: 2px solid #16213e;
+            border-radius: 2px;
+            cursor: se-resize;
+            display: none;
+        }
+
+        .overlay:hover .resize-handle, .overlay.selected .resize-handle {
+            display: block;
+        }
+
+        .overlay .delete-btn {
+            position: absolute;
+            top: -10px;
+            right: -10px;
+            width: 20px;
+            height: 20px;
+            background: #e94560;
+            border: none;
+            border-radius: 50%;
+            color: white;
+            font-size: 12px;
+            cursor: pointer;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            line-height: 1;
+        }
+
+        .overlay:hover .delete-btn, .overlay.selected .delete-btn {
+            display: flex;
+        }
+
+        .output-panel {
+            background: #16213e;
+            border-radius: 10px;
+            padding: 15px;
+            margin-top: 15px;
+        }
+
+        .output-panel h3 {
+            margin: 0 0 10px 0;
+            color: #00d4ff;
+            font-size: 14px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .css-output {
+            background: #0d1b2a;
+            border: 1px solid #0f3460;
+            border-radius: 6px;
+            padding: 15px;
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+            font-size: 12px;
+            white-space: pre-wrap;
+            max-height: 300px;
+            overflow-y: auto;
+            color: #a0e7a0;
+        }
+
+        .btn-row {
+            display: flex;
+            gap: 10px;
+            margin-top: 10px;
+        }
+
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 600;
+            transition: all 0.2s;
+        }
+
+        .btn-primary {
+            background: #00d4ff;
+            color: #1a1a2e;
+        }
+
+        .btn-primary:hover {
+            background: #00a8cc;
+        }
+
+        .btn-secondary {
+            background: #0f3460;
+            color: #eee;
+        }
+
+        .btn-secondary:hover {
+            background: #1a4a7a;
+        }
+
+        .active-overlays {
+            margin-top: 15px;
+        }
+
+        .active-overlay-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 8px 10px;
+            background: #1a1a2e;
+            border-radius: 6px;
+            margin-bottom: 5px;
+            font-size: 12px;
+        }
+
+        .active-overlay-item .coords {
+            color: #888;
+            font-family: monospace;
+        }
+
+        .instructions {
+            background: #0f3460;
+            border-radius: 6px;
+            padding: 10px;
+            font-size: 12px;
+            color: #aaa;
+            margin-bottom: 15px;
+        }
+
+        .instructions strong {
+            color: #00d4ff;
+        }
+
+        .position-inputs {
+            display: none;
+            margin-top: 10px;
+            padding: 10px;
+            background: #1a1a2e;
+            border-radius: 6px;
+        }
+
+        .position-inputs.visible {
+            display: block;
+        }
+
+        .position-inputs label {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 8px;
+            font-size: 12px;
+        }
+
+        .position-inputs input {
+            width: 70px;
+            padding: 5px;
+            border: 1px solid #0f3460;
+            border-radius: 4px;
+            background: #16213e;
+            color: #eee;
+        }
+
+        .position-inputs input[type="range"] {
+            width: 120px;
+            accent-color: #00d4ff;
+        }
+
+        .scale-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 8px;
+            padding: 8px;
+            background: #16213e;
+            border-radius: 4px;
+        }
+
+        .scale-row label {
+            margin-bottom: 0;
+            flex-shrink: 0;
+        }
+
+        .scale-value {
+            font-family: monospace;
+            color: #00d4ff;
+            min-width: 45px;
+        }
+
+        .selected-info {
+            font-size: 11px;
+            color: #00d4ff;
+            margin-bottom: 8px;
+        }
+
+        .option-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 8px;
+            padding: 8px;
+            background: #16213e;
+            border-radius: 4px;
+        }
+
+        .option-row label {
+            margin-bottom: 0;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .option-row input[type="checkbox"] {
+            accent-color: #00d4ff;
+            width: 16px;
+            height: 16px;
+        }
+
+        .spin-speed {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-left: auto;
+        }
+
+        .spin-speed input {
+            width: 60px;
+        }
+
+        .spin-indicator {
+            color: #ff6b6b;
+            font-size: 10px;
+            margin-left: 4px;
+        }
+
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+
+        .overlay img.spinning {
+            animation: spin linear infinite;
+            transform-origin: center;
+        }
+
+        /* Text placeholder styles */
+        .text-placeholder {
+            position: absolute;
+            cursor: move;
+            padding: 2px 4px;
+            border: 2px solid transparent;
+            transition: border-color 0.2s;
+            white-space: nowrap;
+        }
+
+        .text-placeholder:hover, .text-placeholder.selected {
+            border-color: #ff6b6b;
+            background: rgba(255, 107, 107, 0.1);
+        }
+
+        .text-placeholder .delete-btn {
+            position: absolute;
+            top: -10px;
+            right: -10px;
+            width: 20px;
+            height: 20px;
+            background: #e94560;
+            border: none;
+            border-radius: 50%;
+            color: white;
+            font-size: 12px;
+            cursor: pointer;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            line-height: 1;
+        }
+
+        .text-placeholder:hover .delete-btn, .text-placeholder.selected .delete-btn {
+            display: flex;
+        }
+
+        .text-add-form {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .text-add-form input, .text-add-form select {
+            padding: 8px;
+            border: 1px solid #0f3460;
+            border-radius: 4px;
+            background: #1a1a2e;
+            color: #eee;
+            font-size: 12px;
+        }
+
+        .text-add-form .form-row {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+
+        .text-add-form .form-row label {
+            font-size: 11px;
+            min-width: 50px;
+        }
+
+        .text-add-form .form-row input[type="number"] {
+            width: 60px;
+        }
+
+        .text-add-form .form-row input[type="checkbox"] {
+            width: 16px;
+            height: 16px;
+            accent-color: #00d4ff;
+        }
+
+        .text-add-form .form-row input[type="color"] {
+            width: 40px;
+            height: 28px;
+            padding: 0;
+            border: none;
+            cursor: pointer;
+        }
+
+        .text-indicator {
+            color: #ff6b6b;
+            font-size: 10px;
+        }
+
+        .active-overlay-item.text-item {
+            border-left: 3px solid #ff6b6b;
+        }
+
+        /* Text inputs panel */
+        .text-inputs {
+            display: none;
+            margin-top: 10px;
+            padding: 10px;
+            background: #1a1a2e;
+            border-radius: 6px;
+            border-left: 3px solid #ff6b6b;
+        }
+
+        .text-inputs.visible {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <h1>CSS Overlay Mapper</h1>
+
+    <div class="container">
+        <div class="sidebar">
+            <div class="panel">
+                <h3>Background Image</h3>
+                <div class="background-selector">
+                    <label>
+                        <input type="radio" name="background" value="BV_main_Thermia.png" checked>
+                        BV_main_Thermia
+                    </label>
+                    <label>
+                        <input type="radio" name="background" value="BV_main_IVT.png">
+                        BV_main_IVT
+                    </label>
+                </div>
+            </div>
+
+            <div class="panel">
+                <h3>Available Overlays</h3>
+                <div class="instructions">
+                    <strong>Drag</strong> an overlay onto the background to place it.
+                </div>
+                <div class="overlay-list" id="overlay-list">
+                    <!-- Populated by JavaScript -->
+                </div>
+            </div>
+
+            <div class="panel">
+                <h3>Text Placeholders</h3>
+                <div class="instructions">
+                    Add text labels for temperatures, values, etc.
+                </div>
+                <div class="text-add-form">
+                    <input type="text" id="text-name" placeholder="Placeholder name (e.g., temp_outdoor)">
+                    <input type="text" id="text-sample" placeholder="Sample text (e.g., 21.5°C)" value="00.0°C">
+                    <div class="form-row">
+                        <label>Size:</label>
+                        <input type="number" id="text-size" value="14" min="8" max="72">
+                        <label>Bold:</label>
+                        <input type="checkbox" id="text-bold">
+                    </div>
+                    <div class="form-row">
+                        <label>Font:</label>
+                        <select id="text-font">
+                            <option value="Arial, sans-serif">Arial</option>
+                            <option value="'Segoe UI', sans-serif">Segoe UI</option>
+                            <option value="Helvetica, sans-serif">Helvetica</option>
+                            <option value="'Courier New', monospace">Courier New</option>
+                            <option value="Georgia, serif">Georgia</option>
+                            <option value="Verdana, sans-serif">Verdana</option>
+                        </select>
+                    </div>
+                    <div class="form-row">
+                        <label>Color:</label>
+                        <input type="color" id="text-color" value="#ffffff">
+                    </div>
+                    <button class="btn btn-primary" onclick="addTextPlaceholder()" style="margin-top: 5px;">Add Text</button>
+                </div>
+            </div>
+
+            <div class="panel">
+                <h3>Active Elements</h3>
+                <div class="instructions">
+                    <strong>Click</strong> an overlay to select it. <strong>Drag</strong> to reposition.
+                </div>
+                <div class="position-inputs" id="position-inputs">
+                    <div class="selected-info" id="selected-info">No overlay selected</div>
+                    <div class="scale-row">
+                        <label>Scale:</label>
+                        <input type="range" id="input-scale-slider" min="0.1" max="3" step="0.05" value="1">
+                        <input type="number" id="input-scale" min="0.1" max="5" step="0.05" value="1" style="width: 60px;">
+                        <span class="scale-value" id="scale-display">100%</span>
+                    </div>
+                    <div class="option-row">
+                        <label>
+                            <input type="checkbox" id="input-spinning">
+                            Spinning
+                        </label>
+                        <div class="spin-speed">
+                            <span>Speed:</span>
+                            <input type="number" id="input-spin-speed" min="0.1" max="10" step="0.1" value="2">
+                            <span>s</span>
+                        </div>
+                    </div>
+                    <label>
+                        Left (px): <input type="number" id="input-left" value="0">
+                    </label>
+                    <label>
+                        Top (px): <input type="number" id="input-top" value="0">
+                    </label>
+                    <label>
+                        Left (%): <input type="number" id="input-left-pct" step="0.1" value="0">
+                    </label>
+                    <label>
+                        Top (%): <input type="number" id="input-top-pct" step="0.1" value="0">
+                    </label>
+                </div>
+                <div class="text-inputs" id="text-inputs">
+                    <div class="selected-info" id="text-selected-info">No text selected</div>
+                    <label>
+                        Name: <input type="text" id="edit-text-name" style="width: 120px;">
+                    </label>
+                    <label>
+                        Sample: <input type="text" id="edit-text-sample" style="width: 100px;">
+                    </label>
+                    <div class="form-row" style="margin-top: 5px;">
+                        <label>Size:</label>
+                        <input type="number" id="edit-text-size" value="14" min="8" max="72" style="width: 50px;">
+                        <label>Bold:</label>
+                        <input type="checkbox" id="edit-text-bold">
+                    </div>
+                    <div class="form-row">
+                        <label>Color:</label>
+                        <input type="color" id="edit-text-color" value="#ffffff">
+                    </div>
+                    <label>
+                        Left (px): <input type="number" id="edit-text-left" value="0">
+                    </label>
+                    <label>
+                        Top (px): <input type="number" id="edit-text-top" value="0">
+                    </label>
+                    <label>
+                        Left (%): <input type="number" id="edit-text-left-pct" step="0.1" value="0">
+                    </label>
+                    <label>
+                        Top (%): <input type="number" id="edit-text-top-pct" step="0.1" value="0">
+                    </label>
+                </div>
+                <div class="active-overlays" id="active-overlays">
+                    <p style="color: #666; font-size: 12px;">No overlays placed yet</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="main-area">
+            <div class="canvas-container">
+                <div class="canvas-wrapper" id="canvas-wrapper">
+                    <img id="background-image" src="BV_main_Thermia.png" alt="Background">
+                </div>
+            </div>
+
+            <div class="output-panel">
+                <h3>Generated CSS</h3>
+                <div class="css-output" id="css-output">/* Place overlays on the background to generate CSS */</div>
+                <div class="btn-row">
+                    <button class="btn btn-primary" onclick="copyCSS()">Copy CSS</button>
+                    <button class="btn btn-secondary" onclick="copyHTML()">Copy HTML Structure</button>
+                    <button class="btn btn-secondary" onclick="clearAll()">Clear All</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const overlayImages = [
+            '3kw-off.png',
+            '3kw-on.png',
+            'BV_komp_anim.png',
+            'KB-snurr.png',
+            'RAD-pil.png',
+            'RAD-snurr.png',
+            'RAD-hot.png',
+            'VB-snurr.png',
+            'VV-hot.png',
+            'VV-pil.png',
+            'komp-run.gif',
+            'kompressor-off.png'
+        ];
+
+        let placedOverlays = [];
+        let selectedOverlay = null;
+        let overlayIdCounter = 0;
+
+        let placedTexts = [];
+        let selectedText = null;
+        let textIdCounter = 0;
+
+        // Initialize overlay list
+        function initOverlayList() {
+            const list = document.getElementById('overlay-list');
+            list.innerHTML = overlayImages.map(img => `
+                <div class="overlay-item" draggable="true" data-image="${img}">
+                    <img class="overlay-thumb" src="${img}" alt="${img}">
+                    <span>${img.replace('.png', '').replace('.gif', '')}</span>
+                </div>
+            `).join('');
+
+            // Add drag events
+            document.querySelectorAll('.overlay-item').forEach(item => {
+                item.addEventListener('dragstart', handleDragStart);
+                item.addEventListener('dragend', handleDragEnd);
+            });
+        }
+
+        // Drag and drop handlers
+        function handleDragStart(e) {
+            e.target.classList.add('dragging');
+            e.dataTransfer.setData('text/plain', e.target.dataset.image);
+            e.dataTransfer.effectAllowed = 'copy';
+        }
+
+        function handleDragEnd(e) {
+            e.target.classList.remove('dragging');
+        }
+
+        // Canvas drop zone
+        const canvasWrapper = document.getElementById('canvas-wrapper');
+
+        canvasWrapper.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'copy';
+        });
+
+        canvasWrapper.addEventListener('drop', (e) => {
+            e.preventDefault();
+            const imageName = e.dataTransfer.getData('text/plain');
+            if (!imageName) return;
+
+            const rect = canvasWrapper.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+
+            addOverlay(imageName, x, y);
+        });
+
+        // Add overlay to canvas
+        function addOverlay(imageName, x, y) {
+            const id = `overlay-${overlayIdCounter++}`;
+            const bgImg = document.getElementById('background-image');
+
+            const overlay = document.createElement('div');
+            overlay.className = 'overlay';
+            overlay.id = id;
+            overlay.innerHTML = `
+                <img src="${imageName}" alt="${imageName}">
+                <div class="resize-handle" data-id="${id}"></div>
+                <button class="delete-btn" onclick="removeOverlay('${id}')">&times;</button>
+            `;
+
+            // Wait for image to load to get dimensions
+            const img = overlay.querySelector('img');
+            img.onload = () => {
+                // Center the overlay on drop position
+                const left = Math.max(0, x - img.width / 2);
+                const top = Math.max(0, y - img.height / 2);
+
+                overlay.style.left = `${left}px`;
+                overlay.style.top = `${top}px`;
+
+                placedOverlays.push({
+                    id,
+                    image: imageName,
+                    left,
+                    top,
+                    width: img.width,
+                    height: img.height,
+                    originalWidth: img.width,
+                    originalHeight: img.height,
+                    scale: 1,
+                    spinning: false,
+                    spinSpeed: 2
+                });
+
+                updateActiveList();
+                generateCSS();
+            };
+
+            // Make overlay draggable
+            makeDraggable(overlay);
+
+            // Make overlay resizable
+            makeResizable(overlay);
+
+            // Click to select
+            overlay.addEventListener('click', (e) => {
+                if (e.target.classList.contains('delete-btn')) return;
+                if (e.target.classList.contains('resize-handle')) return;
+                selectOverlay(id);
+            });
+
+            canvasWrapper.appendChild(overlay);
+        }
+
+        // Make overlay resizable via handle
+        function makeResizable(element) {
+            const handle = element.querySelector('.resize-handle');
+            let isResizing = false;
+            let startX, startY, startScale, overlayData;
+
+            handle.addEventListener('mousedown', (e) => {
+                e.stopPropagation();
+                isResizing = true;
+                startX = e.clientX;
+                startY = e.clientY;
+
+                overlayData = placedOverlays.find(o => o.id === element.id);
+                startScale = overlayData ? overlayData.scale : 1;
+
+                selectOverlay(element.id);
+                e.preventDefault();
+            });
+
+            document.addEventListener('mousemove', (e) => {
+                if (!isResizing || !overlayData) return;
+
+                const dx = e.clientX - startX;
+                const dy = e.clientY - startY;
+                const delta = (dx + dy) / 2;
+                const scaleChange = delta / 100;
+
+                const newScale = Math.max(0.1, Math.min(5, startScale + scaleChange));
+                updateOverlayScale(element.id, newScale);
+            });
+
+            document.addEventListener('mouseup', () => {
+                isResizing = false;
+            });
+        }
+
+        // Update overlay scale
+        function updateOverlayScale(id, scale) {
+            const overlay = placedOverlays.find(o => o.id === id);
+            const element = document.getElementById(id);
+
+            if (overlay && element) {
+                overlay.scale = scale;
+                overlay.width = overlay.originalWidth * scale;
+                overlay.height = overlay.originalHeight * scale;
+
+                const img = element.querySelector('img');
+                if (overlay.spinning) {
+                    // Update explicit dimensions for spinning
+                    img.style.width = `${overlay.width}px`;
+                    img.style.height = `${overlay.height}px`;
+                } else {
+                    img.style.transform = `scale(${scale})`;
+                }
+
+                // Update resize handle position
+                const handle = element.querySelector('.resize-handle');
+                handle.style.bottom = `${-6 - (overlay.originalHeight * (scale - 1))}px`;
+                handle.style.right = `${-6 - (overlay.originalWidth * (scale - 1))}px`;
+
+                updateActiveList();
+                updatePositionInputs();
+                generateCSS();
+            }
+        }
+
+        // Make overlay draggable within canvas
+        function makeDraggable(element) {
+            let isDragging = false;
+            let startX, startY, initialLeft, initialTop;
+
+            element.addEventListener('mousedown', (e) => {
+                if (e.target.classList.contains('delete-btn')) return;
+                if (e.target.classList.contains('resize-handle')) return;
+                isDragging = true;
+                element.classList.add('selected');
+
+                startX = e.clientX;
+                startY = e.clientY;
+                initialLeft = parseInt(element.style.left) || 0;
+                initialTop = parseInt(element.style.top) || 0;
+
+                selectOverlay(element.id);
+                e.preventDefault();
+            });
+
+            document.addEventListener('mousemove', (e) => {
+                if (!isDragging) return;
+
+                const dx = e.clientX - startX;
+                const dy = e.clientY - startY;
+
+                const newLeft = Math.max(0, initialLeft + dx);
+                const newTop = Math.max(0, initialTop + dy);
+
+                element.style.left = `${newLeft}px`;
+                element.style.top = `${newTop}px`;
+
+                // Update stored position
+                const overlay = placedOverlays.find(o => o.id === element.id);
+                if (overlay) {
+                    overlay.left = newLeft;
+                    overlay.top = newTop;
+                }
+
+                updateActiveList();
+                updatePositionInputs();
+                generateCSS();
+            });
+
+            document.addEventListener('mouseup', () => {
+                isDragging = false;
+            });
+        }
+
+        // Select overlay
+        function selectOverlay(id) {
+            // Deselect texts
+            document.querySelectorAll('.text-placeholder').forEach(t => t.classList.remove('selected'));
+            selectedText = null;
+            document.getElementById('text-inputs').classList.remove('visible');
+
+            // Select overlay
+            document.querySelectorAll('.overlay').forEach(o => o.classList.remove('selected'));
+            const overlay = document.getElementById(id);
+            if (overlay) {
+                overlay.classList.add('selected');
+                selectedOverlay = id;
+                updatePositionInputs();
+                document.getElementById('position-inputs').classList.add('visible');
+            }
+        }
+
+        // Update position inputs
+        function updatePositionInputs() {
+            const overlay = placedOverlays.find(o => o.id === selectedOverlay);
+            if (!overlay) return;
+
+            const bgImg = document.getElementById('background-image');
+            const bgWidth = bgImg.naturalWidth || bgImg.width;
+            const bgHeight = bgImg.naturalHeight || bgImg.height;
+
+            document.getElementById('selected-info').textContent = `Selected: ${overlay.image}`;
+            document.getElementById('input-left').value = Math.round(overlay.left);
+            document.getElementById('input-top').value = Math.round(overlay.top);
+            document.getElementById('input-left-pct').value = ((overlay.left / bgWidth) * 100).toFixed(1);
+            document.getElementById('input-top-pct').value = ((overlay.top / bgHeight) * 100).toFixed(1);
+
+            // Update scale inputs
+            document.getElementById('input-scale').value = overlay.scale.toFixed(2);
+            document.getElementById('input-scale-slider').value = overlay.scale;
+            document.getElementById('scale-display').textContent = `${Math.round(overlay.scale * 100)}%`;
+
+            // Update spinning inputs
+            document.getElementById('input-spinning').checked = overlay.spinning || false;
+            document.getElementById('input-spin-speed').value = overlay.spinSpeed || 2;
+        }
+
+        // Position input handlers
+        document.getElementById('input-left').addEventListener('change', (e) => {
+            updateOverlayPosition('left', parseInt(e.target.value));
+        });
+
+        document.getElementById('input-top').addEventListener('change', (e) => {
+            updateOverlayPosition('top', parseInt(e.target.value));
+        });
+
+        document.getElementById('input-left-pct').addEventListener('change', (e) => {
+            const bgImg = document.getElementById('background-image');
+            const bgWidth = bgImg.naturalWidth || bgImg.width;
+            updateOverlayPosition('left', (parseFloat(e.target.value) / 100) * bgWidth);
+        });
+
+        document.getElementById('input-top-pct').addEventListener('change', (e) => {
+            const bgImg = document.getElementById('background-image');
+            const bgHeight = bgImg.naturalHeight || bgImg.height;
+            updateOverlayPosition('top', (parseFloat(e.target.value) / 100) * bgHeight);
+        });
+
+        // Scale input handlers
+        document.getElementById('input-scale').addEventListener('change', (e) => {
+            if (selectedOverlay) {
+                updateOverlayScale(selectedOverlay, parseFloat(e.target.value));
+            }
+        });
+
+        document.getElementById('input-scale-slider').addEventListener('input', (e) => {
+            if (selectedOverlay) {
+                updateOverlayScale(selectedOverlay, parseFloat(e.target.value));
+            }
+        });
+
+        // Spinning input handlers
+        document.getElementById('input-spinning').addEventListener('change', (e) => {
+            if (selectedOverlay) {
+                updateOverlaySpinning(selectedOverlay, e.target.checked);
+            }
+        });
+
+        document.getElementById('input-spin-speed').addEventListener('change', (e) => {
+            if (selectedOverlay) {
+                updateOverlaySpinSpeed(selectedOverlay, parseFloat(e.target.value));
+            }
+        });
+
+        // Update overlay spinning state
+        function updateOverlaySpinning(id, spinning) {
+            const overlay = placedOverlays.find(o => o.id === id);
+            const element = document.getElementById(id);
+
+            if (overlay && element) {
+                overlay.spinning = spinning;
+                const img = element.querySelector('img');
+
+                if (spinning) {
+                    // Apply spinning to the img with explicit scaled dimensions
+                    img.classList.add('spinning');
+                    img.style.animationDuration = `${overlay.spinSpeed}s`;
+                    // Set explicit width/height instead of transform scale
+                    img.style.width = `${overlay.width}px`;
+                    img.style.height = `${overlay.height}px`;
+                    img.style.transform = '';
+                } else {
+                    img.classList.remove('spinning');
+                    img.style.animationDuration = '';
+                    // Restore transform scale approach
+                    img.style.width = '';
+                    img.style.height = '';
+                    img.style.transform = `scale(${overlay.scale})`;
+                }
+
+                // Update resize handle position
+                const handle = element.querySelector('.resize-handle');
+                handle.style.bottom = `${-6 - (overlay.originalHeight * (overlay.scale - 1))}px`;
+                handle.style.right = `${-6 - (overlay.originalWidth * (overlay.scale - 1))}px`;
+
+                updateActiveList();
+                generateCSS();
+            }
+        }
+
+        // Update overlay spin speed
+        function updateOverlaySpinSpeed(id, speed) {
+            const overlay = placedOverlays.find(o => o.id === id);
+            const element = document.getElementById(id);
+
+            if (overlay && element) {
+                overlay.spinSpeed = speed;
+
+                if (overlay.spinning) {
+                    const img = element.querySelector('img');
+                    img.style.animationDuration = `${speed}s`;
+                }
+
+                generateCSS();
+            }
+        }
+
+        function updateOverlayPosition(prop, value) {
+            if (!selectedOverlay) return;
+
+            const overlay = placedOverlays.find(o => o.id === selectedOverlay);
+            const element = document.getElementById(selectedOverlay);
+
+            if (overlay && element) {
+                overlay[prop] = value;
+                element.style[prop] = `${value}px`;
+                updateActiveList();
+                updatePositionInputs();
+                generateCSS();
+            }
+        }
+
+        // Remove overlay
+        function removeOverlay(id) {
+            const element = document.getElementById(id);
+            if (element) element.remove();
+
+            placedOverlays = placedOverlays.filter(o => o.id !== id);
+
+            if (selectedOverlay === id) {
+                selectedOverlay = null;
+                document.getElementById('position-inputs').classList.remove('visible');
+            }
+
+            updateActiveList();
+            generateCSS();
+        }
+
+        // Update active overlays list
+        function updateActiveList() {
+            const container = document.getElementById('active-overlays');
+
+            if (placedOverlays.length === 0 && placedTexts.length === 0) {
+                container.innerHTML = '<p style="color: #666; font-size: 12px;">No elements placed yet</p>';
+                return;
+            }
+
+            const bgImg = document.getElementById('background-image');
+            const bgWidth = bgImg.naturalWidth || bgImg.width;
+            const bgHeight = bgImg.naturalHeight || bgImg.height;
+
+            let html = '';
+
+            // Overlays
+            html += placedOverlays.map(o => {
+                const leftPct = ((o.left / bgWidth) * 100).toFixed(1);
+                const topPct = ((o.top / bgHeight) * 100).toFixed(1);
+                const scalePercent = Math.round((o.scale || 1) * 100);
+                const spinIndicator = o.spinning ? '<span class="spin-indicator">&#x21bb;</span>' : '';
+                return `
+                    <div class="active-overlay-item" onclick="selectOverlay('${o.id}')">
+                        <span>${o.image.replace('.png', '').replace('.gif', '')}${spinIndicator}</span>
+                        <span class="coords">${Math.round(o.left)}, ${Math.round(o.top)} @ ${scalePercent}%</span>
+                    </div>
+                `;
+            }).join('');
+
+            // Texts
+            html += placedTexts.map(t => {
+                return `
+                    <div class="active-overlay-item text-item" onclick="selectText('${t.id}')">
+                        <span><span class="text-indicator">T</span> ${t.name}</span>
+                        <span class="coords">${Math.round(t.left)}, ${Math.round(t.top)}</span>
+                    </div>
+                `;
+            }).join('');
+
+            container.innerHTML = html;
+        }
+
+        // Generate CSS
+        function generateCSS() {
+            const bgImg = document.getElementById('background-image');
+            const bgWidth = bgImg.naturalWidth || bgImg.width;
+            const bgHeight = bgImg.naturalHeight || bgImg.height;
+            const bgSrc = bgImg.src.split('/').pop();
+
+            if (placedOverlays.length === 0 && placedTexts.length === 0) {
+                document.getElementById('css-output').textContent = '/* Place overlays or text on the background to generate CSS */';
+                return;
+            }
+
+            // Check if any overlay is spinning
+            const hasSpinning = placedOverlays.some(o => o.spinning);
+
+            let css = `/* Background: ${bgSrc} (${bgWidth}x${bgHeight}) */\n\n`;
+
+            // Add spin animation if needed
+            if (hasSpinning) {
+                css += `/* Rotating animation for pumps */\n`;
+                css += `@keyframes spin {\n`;
+                css += `    from { transform: rotate(0deg); }\n`;
+                css += `    to { transform: rotate(360deg); }\n`;
+                css += `}\n\n`;
+            }
+
+            css += `.heatpump-display {\n`;
+            css += `    position: relative;\n`;
+            css += `    width: ${bgWidth}px;\n`;
+            css += `    height: ${bgHeight}px;\n`;
+            css += `    background-image: url('${bgSrc}');\n`;
+            css += `    background-size: contain;\n`;
+            css += `    background-repeat: no-repeat;\n`;
+            css += `}\n\n`;
+
+            // Overlay CSS
+            placedOverlays.forEach(o => {
+                const name = o.image.replace('.png', '').replace('.gif', '').replace(/-/g, '_');
+                const leftPct = ((o.left / bgWidth) * 100).toFixed(2);
+                const topPct = ((o.top / bgHeight) * 100).toFixed(2);
+                const scale = o.scale || 1;
+
+                css += `/* ${o.image}${o.spinning ? ' (spinning)' : ''} */\n`;
+                css += `.overlay-${name} {\n`;
+                css += `    position: absolute;\n`;
+                css += `    left: ${leftPct}%;   /* ${Math.round(o.left)}px */\n`;
+                css += `    top: ${topPct}%;    /* ${Math.round(o.top)}px */\n`;
+                css += `    background-image: url('${o.image}');\n`;
+                css += `    background-size: contain;\n`;
+                css += `    background-repeat: no-repeat;\n`;
+                css += `    width: ${Math.round(o.width)}px;   /* original: ${o.originalWidth}px, scale: ${scale.toFixed(2)} */\n`;
+                css += `    height: ${Math.round(o.height)}px;  /* original: ${o.originalHeight}px, scale: ${scale.toFixed(2)} */\n`;
+                if (scale !== 1 && !o.spinning) {
+                    css += `    /* Alternative: use transform for sharper scaling */\n`;
+                    css += `    /* width: ${o.originalWidth}px; height: ${o.originalHeight}px; transform: scale(${scale.toFixed(2)}); transform-origin: top left; */\n`;
+                }
+                css += `    display: none;  /* Toggle with .active */\n`;
+                css += `}\n`;
+                css += `.overlay-${name}.active {\n`;
+                css += `    display: block;\n`;
+                if (o.spinning) {
+                    css += `    transform-origin: center;\n`;
+                    css += `    animation: spin ${o.spinSpeed}s linear infinite;\n`;
+                }
+                css += `}\n\n`;
+            });
+
+            // Text placeholder CSS
+            if (placedTexts.length > 0) {
+                css += `/* ===== Text Placeholders ===== */\n\n`;
+                placedTexts.forEach(t => {
+                    const leftPct = ((t.left / bgWidth) * 100).toFixed(2);
+                    const topPct = ((t.top / bgHeight) * 100).toFixed(2);
+                    const safeName = t.name.replace(/[^a-zA-Z0-9_-]/g, '_');
+
+                    css += `/* Text: ${t.name} */\n`;
+                    css += `.text-${safeName} {\n`;
+                    css += `    position: absolute;\n`;
+                    css += `    left: ${leftPct}%;   /* ${Math.round(t.left)}px */\n`;
+                    css += `    top: ${topPct}%;    /* ${Math.round(t.top)}px */\n`;
+                    css += `    font-family: ${t.font};\n`;
+                    css += `    font-size: ${t.size}px;\n`;
+                    css += `    font-weight: ${t.bold ? 'bold' : 'normal'};\n`;
+                    css += `    color: ${t.color};\n`;
+                    css += `    white-space: nowrap;\n`;
+                    css += `}\n\n`;
+                });
+            }
+
+            document.getElementById('css-output').textContent = css;
+        }
+
+        // Copy functions
+        function copyCSS() {
+            const css = document.getElementById('css-output').textContent;
+            navigator.clipboard.writeText(css).then(() => {
+                alert('CSS copied to clipboard!');
+            });
+        }
+
+        function copyHTML() {
+            const bgImg = document.getElementById('background-image');
+            const bgSrc = bgImg.src.split('/').pop();
+
+            let html = `<div class="heatpump-display">\n`;
+
+            // Overlays
+            placedOverlays.forEach(o => {
+                const name = o.image.replace('.png', '').replace('.gif', '').replace(/-/g, '_');
+                html += `    <div class="overlay-${name}"></div>\n`;
+            });
+
+            // Text placeholders
+            placedTexts.forEach(t => {
+                const safeName = t.name.replace(/[^a-zA-Z0-9_-]/g, '_');
+                html += `    <span class="text-${safeName}">{{${t.name}}}</span>\n`;
+            });
+
+            html += `</div>`;
+
+            navigator.clipboard.writeText(html).then(() => {
+                alert('HTML copied to clipboard!');
+            });
+        }
+
+        function clearAll() {
+            // Clear overlays
+            placedOverlays.forEach(o => {
+                const element = document.getElementById(o.id);
+                if (element) element.remove();
+            });
+            placedOverlays = [];
+            selectedOverlay = null;
+            document.getElementById('position-inputs').classList.remove('visible');
+
+            // Clear texts
+            placedTexts.forEach(t => {
+                const element = document.getElementById(t.id);
+                if (element) element.remove();
+            });
+            placedTexts = [];
+            selectedText = null;
+            document.getElementById('text-inputs').classList.remove('visible');
+
+            updateActiveList();
+            generateCSS();
+        }
+
+        // Background switcher
+        document.querySelectorAll('input[name="background"]').forEach(radio => {
+            radio.addEventListener('change', (e) => {
+                document.getElementById('background-image').src = e.target.value;
+                // Regenerate CSS with new background
+                setTimeout(generateCSS, 100);
+            });
+        });
+
+        // ============== TEXT PLACEHOLDER FUNCTIONS ==============
+
+        function addTextPlaceholder() {
+            const name = document.getElementById('text-name').value.trim();
+            const sample = document.getElementById('text-sample').value || '00.0°C';
+            const size = parseInt(document.getElementById('text-size').value) || 14;
+            const bold = document.getElementById('text-bold').checked;
+            const font = document.getElementById('text-font').value;
+            const color = document.getElementById('text-color').value;
+
+            if (!name) {
+                alert('Please enter a placeholder name');
+                return;
+            }
+
+            const id = `text-${textIdCounter++}`;
+            const canvasWrapper = document.getElementById('canvas-wrapper');
+
+            const textEl = document.createElement('div');
+            textEl.className = 'text-placeholder';
+            textEl.id = id;
+            textEl.innerHTML = `
+                <span class="text-content">${sample}</span>
+                <button class="delete-btn" onclick="removeText('${id}')">&times;</button>
+            `;
+
+            // Style the text
+            textEl.style.fontSize = `${size}px`;
+            textEl.style.fontFamily = font;
+            textEl.style.fontWeight = bold ? 'bold' : 'normal';
+            textEl.style.color = color;
+            textEl.style.left = '50px';
+            textEl.style.top = '50px';
+
+            const textData = {
+                id,
+                name,
+                sample,
+                size,
+                bold,
+                font,
+                color,
+                left: 50,
+                top: 50
+            };
+
+            placedTexts.push(textData);
+
+            // Make text draggable
+            makeTextDraggable(textEl);
+
+            // Click to select
+            textEl.addEventListener('click', (e) => {
+                if (e.target.classList.contains('delete-btn')) return;
+                selectText(id);
+            });
+
+            canvasWrapper.appendChild(textEl);
+
+            // Clear the name input
+            document.getElementById('text-name').value = '';
+
+            updateActiveList();
+            generateCSS();
+        }
+
+        function makeTextDraggable(element) {
+            let isDragging = false;
+            let startX, startY, initialLeft, initialTop;
+
+            element.addEventListener('mousedown', (e) => {
+                if (e.target.classList.contains('delete-btn')) return;
+                isDragging = true;
+                element.classList.add('selected');
+
+                startX = e.clientX;
+                startY = e.clientY;
+                initialLeft = parseInt(element.style.left) || 0;
+                initialTop = parseInt(element.style.top) || 0;
+
+                selectText(element.id);
+                e.preventDefault();
+            });
+
+            document.addEventListener('mousemove', (e) => {
+                if (!isDragging) return;
+
+                const dx = e.clientX - startX;
+                const dy = e.clientY - startY;
+
+                const newLeft = Math.max(0, initialLeft + dx);
+                const newTop = Math.max(0, initialTop + dy);
+
+                element.style.left = `${newLeft}px`;
+                element.style.top = `${newTop}px`;
+
+                // Update stored position
+                const text = placedTexts.find(t => t.id === element.id);
+                if (text) {
+                    text.left = newLeft;
+                    text.top = newTop;
+                }
+
+                updateActiveList();
+                updateTextInputs();
+                generateCSS();
+            });
+
+            document.addEventListener('mouseup', () => {
+                isDragging = false;
+            });
+        }
+
+        function selectText(id) {
+            // Deselect overlays
+            document.querySelectorAll('.overlay').forEach(o => o.classList.remove('selected'));
+            selectedOverlay = null;
+            document.getElementById('position-inputs').classList.remove('visible');
+
+            // Deselect other texts
+            document.querySelectorAll('.text-placeholder').forEach(t => t.classList.remove('selected'));
+
+            const textEl = document.getElementById(id);
+            if (textEl) {
+                textEl.classList.add('selected');
+                selectedText = id;
+                updateTextInputs();
+                document.getElementById('text-inputs').classList.add('visible');
+            }
+        }
+
+        function updateTextInputs() {
+            const text = placedTexts.find(t => t.id === selectedText);
+            if (!text) return;
+
+            const bgImg = document.getElementById('background-image');
+            const bgWidth = bgImg.naturalWidth || bgImg.width;
+            const bgHeight = bgImg.naturalHeight || bgImg.height;
+
+            document.getElementById('text-selected-info').textContent = `Selected: ${text.name}`;
+            document.getElementById('edit-text-name').value = text.name;
+            document.getElementById('edit-text-sample').value = text.sample;
+            document.getElementById('edit-text-size').value = text.size;
+            document.getElementById('edit-text-bold').checked = text.bold;
+            document.getElementById('edit-text-color').value = text.color;
+            document.getElementById('edit-text-left').value = Math.round(text.left);
+            document.getElementById('edit-text-top').value = Math.round(text.top);
+            document.getElementById('edit-text-left-pct').value = ((text.left / bgWidth) * 100).toFixed(1);
+            document.getElementById('edit-text-top-pct').value = ((text.top / bgHeight) * 100).toFixed(1);
+        }
+
+        function removeText(id) {
+            const element = document.getElementById(id);
+            if (element) element.remove();
+
+            placedTexts = placedTexts.filter(t => t.id !== id);
+
+            if (selectedText === id) {
+                selectedText = null;
+                document.getElementById('text-inputs').classList.remove('visible');
+            }
+
+            updateActiveList();
+            generateCSS();
+        }
+
+        // Text input handlers
+        document.getElementById('edit-text-name').addEventListener('change', (e) => {
+            updateTextProperty('name', e.target.value);
+        });
+
+        document.getElementById('edit-text-sample').addEventListener('change', (e) => {
+            updateTextProperty('sample', e.target.value);
+            const textEl = document.getElementById(selectedText);
+            if (textEl) {
+                textEl.querySelector('.text-content').textContent = e.target.value;
+            }
+        });
+
+        document.getElementById('edit-text-size').addEventListener('change', (e) => {
+            const size = parseInt(e.target.value);
+            updateTextProperty('size', size);
+            const textEl = document.getElementById(selectedText);
+            if (textEl) {
+                textEl.style.fontSize = `${size}px`;
+            }
+        });
+
+        document.getElementById('edit-text-bold').addEventListener('change', (e) => {
+            updateTextProperty('bold', e.target.checked);
+            const textEl = document.getElementById(selectedText);
+            if (textEl) {
+                textEl.style.fontWeight = e.target.checked ? 'bold' : 'normal';
+            }
+        });
+
+        document.getElementById('edit-text-color').addEventListener('change', (e) => {
+            updateTextProperty('color', e.target.value);
+            const textEl = document.getElementById(selectedText);
+            if (textEl) {
+                textEl.style.color = e.target.value;
+            }
+        });
+
+        document.getElementById('edit-text-left').addEventListener('change', (e) => {
+            updateTextPosition('left', parseInt(e.target.value));
+        });
+
+        document.getElementById('edit-text-top').addEventListener('change', (e) => {
+            updateTextPosition('top', parseInt(e.target.value));
+        });
+
+        document.getElementById('edit-text-left-pct').addEventListener('change', (e) => {
+            const bgImg = document.getElementById('background-image');
+            const bgWidth = bgImg.naturalWidth || bgImg.width;
+            updateTextPosition('left', (parseFloat(e.target.value) / 100) * bgWidth);
+        });
+
+        document.getElementById('edit-text-top-pct').addEventListener('change', (e) => {
+            const bgImg = document.getElementById('background-image');
+            const bgHeight = bgImg.naturalHeight || bgImg.height;
+            updateTextPosition('top', (parseFloat(e.target.value) / 100) * bgHeight);
+        });
+
+        function updateTextProperty(prop, value) {
+            if (!selectedText) return;
+            const text = placedTexts.find(t => t.id === selectedText);
+            if (text) {
+                text[prop] = value;
+                updateActiveList();
+                generateCSS();
+            }
+        }
+
+        function updateTextPosition(prop, value) {
+            if (!selectedText) return;
+
+            const text = placedTexts.find(t => t.id === selectedText);
+            const element = document.getElementById(selectedText);
+
+            if (text && element) {
+                text[prop] = value;
+                element.style[prop] = `${value}px`;
+                updateActiveList();
+                updateTextInputs();
+                generateCSS();
+            }
+        }
+
+        // Initialize
+        initOverlayList();
+    </script>
+</body>
+</html>

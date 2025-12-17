@@ -1,0 +1,1350 @@
+/*
+ * Thermia Heat Pump Dashboard - WebSocket Version
+ * Modern design with heat pump themed colors
+ */
+
+/* Import Font Awesome */
+@import url('https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css');
+
+/* ==================== Global Styles ==================== */
+:root {
+    /* Heat Pump Theme Colors */
+    --color-hot: #ff6b6b;
+    --color-warm: #ff8c42;
+    --color-cold: #4dabf7;
+    --color-cool: #339af0;
+    --color-success: #51cf66;
+    --color-warning: #ffd43b;
+    --color-danger: #ff6b6b;
+    --color-info: #74c0fc;
+
+    /* Neutrals */
+    --color-bg: #f8f9fa;
+    --color-card: #ffffff;
+    --color-text: #212529;
+    --color-text-muted: #6c757d;
+    --color-border: #dee2e6;
+
+    /* Shadows */
+    --shadow-sm: 0 2px 4px rgba(0,0,0,0.08);
+    --shadow-md: 0 4px 12px rgba(0,0,0,0.12);
+    --shadow-lg: 0 8px 24px rgba(0,0,0,0.15);
+}
+
+body {
+    background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    color: var(--color-text);
+    min-height: 100vh;
+}
+
+/* ==================== Header ==================== */
+.main-header {
+    background: linear-gradient(135deg, #ff6b6b 0%, #ff8c42 100%);
+    box-shadow: var(--shadow-md);
+    padding: 0.5rem 1rem;
+}
+
+.navbar-brand {
+    font-size: 1.3rem;
+    font-weight: bold;
+    color: #ffffff !important;
+}
+
+/* View Tabs */
+.view-tabs .nav-link {
+    color: rgba(255,255,255,0.8);
+    padding: 0.4rem 1rem;
+    border-radius: 20px;
+    font-size: 0.9rem;
+    transition: all 0.2s;
+}
+
+.view-tabs .nav-link:hover {
+    color: #ffffff;
+    background: rgba(255,255,255,0.1);
+}
+
+.view-tabs .nav-link.active {
+    color: #ff6b6b;
+    background: #ffffff;
+    font-weight: 600;
+}
+
+#last-update {
+    color: rgba(255,255,255,0.8) !important;
+    font-size: 0.8rem;
+}
+
+.connection-badge {
+    font-size: 0.8rem;
+    padding: 0.3rem 0.6rem;
+}
+
+.connection-badge.connected {
+    background-color: #28a745 !important;
+}
+
+.connection-badge.disconnected {
+    background-color: #dc3545 !important;
+}
+
+/* ==================== Status Bar ==================== */
+.status-bar {
+    background: #2d3436;
+    padding: 0.5rem 0;
+    border-bottom: 1px solid #636e72;
+}
+
+.status-pill {
+    background: #636e72;
+    color: #ffffff;
+    padding: 0.3rem 0.6rem;
+    font-size: 0.75rem;
+    border-radius: 15px;
+    transition: all 0.2s;
+}
+
+.status-pill.status-on {
+    background: #00b894;
+}
+
+.status-pill.status-off {
+    background: #636e72;
+}
+
+.status-pill.status-alarm {
+    background: #d63031;
+    animation: pulse-alarm 1s infinite;
+}
+
+@keyframes pulse-alarm {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.6; }
+}
+
+/* ==================== View Content ==================== */
+.view-content {
+    display: none;
+}
+
+.view-content.active {
+    display: block;
+}
+
+/* ==================== Data Panels (Monitor View) ==================== */
+.data-panel {
+    border: none;
+    border-radius: 8px;
+    box-shadow: var(--shadow-sm);
+}
+
+.data-panel .card-header {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    font-weight: 600;
+    font-size: 0.9rem;
+    border-radius: 8px 8px 0 0 !important;
+}
+
+/* ==================== Metric Cards - Modern Flat Style ==================== */
+.metric-card {
+    background: #ffffff;
+    border-radius: 8px;
+    padding: 0.6rem 0.5rem;
+    border: none;
+    text-align: center;
+    transition: all 0.2s ease;
+    height: 100%;
+    position: relative;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+}
+
+.metric-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 4px;
+    border-radius: 8px 8px 0 0;
+}
+
+.metric-card:hover {
+    box-shadow: 0 4px 12px rgba(0,0,0,0.12);
+}
+
+.metric-label {
+    font-size: 0.8rem;
+    color: #2d3436;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    margin-bottom: 0.2rem;
+    font-weight: 700;
+}
+
+.metric-label i {
+    margin-right: 0.25rem;
+    opacity: 0.8;
+}
+
+.metric-value {
+    font-size: 1.4rem;
+    font-weight: 700;
+    color: #2d3436;
+    line-height: 1.1;
+}
+
+.metric-minmax {
+    display: flex;
+    justify-content: space-around;
+    font-size: 0.8rem;
+    color: #495057;
+    margin-top: 0.35rem;
+    padding-top: 0.35rem;
+    border-top: 1px dashed rgba(0,0,0,0.08);
+    font-weight: 500;
+}
+
+.metric-minmax span {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+}
+
+.metric-minmax i {
+    font-size: 0.7rem;
+}
+
+.metric-minmax .fa-arrow-down { color: #3498db; }
+.metric-minmax .fa-arrow-up { color: #e74c3c; }
+
+/* Metric card color accents - top bar colors */
+.metric-outdoor::before { background: linear-gradient(90deg, #74b9ff, #a3d1ff); }
+.metric-indoor::before { background: linear-gradient(90deg, #00b894, #55efc4); }
+.metric-hotgas::before { background: linear-gradient(90deg, #e17055, #fab1a0); }
+.metric-integral::before { background: linear-gradient(90deg, #636e72, #b2bec3); }
+.metric-rad-forward::before { background: linear-gradient(90deg, #ff6b6b, #ff8787); }
+.metric-rad-return::before { background: linear-gradient(90deg, #feca57, #fed77a); }
+.metric-brine-in::before { background: linear-gradient(90deg, #54a0ff, #74b9ff); }
+.metric-brine-out::before { background: linear-gradient(90deg, #00d2d3, #81ecec); }
+.metric-hotwater::before { background: linear-gradient(90deg, #ff9ff3, #ffc8f0); }
+.metric-power::before { background: linear-gradient(90deg, #f39c12, #f5b041); }
+.metric-cop::before { background: linear-gradient(90deg, #27ae60, #58d68d); }
+.metric-energy::before { background: linear-gradient(90deg, #3498db, #5dade2); }
+.metric-cost::before { background: linear-gradient(90deg, #f1c40f, #f4d03f); }
+.metric-comp-time::before { background: linear-gradient(90deg, #9b59b6, #bb8fce); }
+.metric-aux-time::before { background: linear-gradient(90deg, #e74c3c, #ec7063); }
+
+.data-table {
+    font-size: 0.85rem;
+}
+
+.data-table td {
+    padding: 0.5rem 0.75rem;
+    vertical-align: middle;
+}
+
+.data-table td:first-child {
+    color: #636e72;
+}
+
+.data-table td:last-child {
+    font-size: 1rem;
+}
+
+/* Schema Card */
+.schema-card {
+    border: none;
+    border-radius: 8px;
+    box-shadow: var(--shadow-sm);
+    height: 100%;
+}
+
+.schema-card .card-header {
+    background: linear-gradient(135deg, #ff6b6b 0%, #ff8c42 100%);
+    color: white;
+    font-weight: 600;
+    border-radius: 8px 8px 0 0 !important;
+}
+
+/* Collapsible sections */
+.collapsible-header {
+    cursor: pointer;
+    background: #f8f9fa;
+    transition: background 0.2s;
+}
+
+.collapsible-header:hover {
+    background: #e9ecef;
+}
+
+.collapsible-header .collapse-icon {
+    transition: transform 0.3s;
+}
+
+.collapsible-header[aria-expanded="true"] .collapse-icon {
+    transform: rotate(180deg);
+}
+
+/* ==================== Analys View ==================== */
+.legend-color {
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    border-radius: 2px;
+    margin-right: 4px;
+    vertical-align: middle;
+}
+
+.stat-mini {
+    padding: 0.5rem;
+}
+
+.stat-mini .stat-label {
+    font-size: 0.7rem;
+    color: #636e72;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.stat-mini .stat-value {
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: #2d3436;
+}
+
+/* Series toggles row - only show for temperature chart */
+#series-toggles-row {
+    transition: all 0.3s;
+}
+
+/* Overlay toggles */
+.overlay-toggle:checked + label {
+    font-weight: 600;
+}
+
+/* Overlay legend colors for checkboxes */
+#overlay-compressor + label::before {
+    content: '';
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    background: rgba(52, 152, 219, 0.5);
+    border-radius: 2px;
+    margin-right: 4px;
+    vertical-align: middle;
+}
+
+#overlay-valve + label::before {
+    content: '';
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    background: rgba(155, 89, 182, 0.5);
+    border-radius: 2px;
+    margin-right: 4px;
+    vertical-align: middle;
+}
+
+#overlay-aux + label::before {
+    content: '';
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    background: rgba(231, 76, 60, 0.5);
+    border-radius: 2px;
+    margin-right: 4px;
+    vertical-align: middle;
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.7; }
+}
+
+/* ==================== Controls ==================== */
+.controls-section {
+    background: white;
+    padding: 1.2rem;
+    border-radius: 12px;
+    box-shadow: var(--shadow-sm);
+    margin-bottom: 1.5rem;
+}
+
+.update-time {
+    font-size: 0.9rem;
+    color: var(--color-text-muted);
+}
+
+/* ==================== KPI Cards ==================== */
+.kpi-card {
+    border: none;
+    border-radius: 8px;
+    box-shadow: var(--shadow-md);
+    transition: all 0.2s ease;
+    overflow: hidden;
+    height: 100%;
+}
+
+.kpi-card .card-body {
+    padding: 0.6rem 0.8rem;
+}
+
+.kpi-card:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-lg);
+}
+
+.kpi-success {
+    background: linear-gradient(135deg, #51cf66 0%, #40c057 100%);
+    color: white;
+}
+
+.kpi-primary {
+    background: linear-gradient(135deg, #339af0 0%, #228be6 100%);
+    color: white;
+}
+
+.kpi-info {
+    background: linear-gradient(135deg, #74c0fc 0%, #4dabf7 100%);
+    color: white;
+}
+
+.kpi-warning {
+    background: linear-gradient(135deg, #ffd43b 0%, #fcc419 100%);
+    color: #212529;
+}
+
+.kpi-icon {
+    font-size: 1.8rem;
+    opacity: 0.85;
+    margin-right: 0.5rem;
+    flex-shrink: 0;
+}
+
+.kpi-label {
+    font-size: 0.7rem;
+    opacity: 0.85;
+    margin-bottom: 0.1rem;
+    line-height: 1;
+}
+
+.kpi-value {
+    font-size: 1.4rem;
+    font-weight: 700;
+    margin: 0;
+    line-height: 1.1;
+}
+
+.kpi-subtitle {
+    font-size: 0.65rem;
+    opacity: 0.75;
+    margin-top: 0.1rem;
+    line-height: 1;
+}
+
+/* ==================== Chart Cards ==================== */
+.chart-card {
+    background: white;
+    border-radius: 12px;
+    box-shadow: var(--shadow-sm);
+    margin-bottom: 1.5rem;
+    overflow: hidden;
+}
+
+.chart-header {
+    background: linear-gradient(135deg, #ff6b6b 0%, #ff8c42 100%);
+    color: white;
+    padding: 1rem 1.5rem;
+    font-weight: 600;
+    font-size: 1.1rem;
+}
+
+.chart-body {
+    padding: 1.5rem;
+}
+
+.chart-container {
+    width: 100%;
+    border-radius: 8px;
+}
+
+/* Plotly/ECharts container styling */
+[id$="-chart"] {
+    border-radius: 8px;
+}
+
+/* ==================== Loading States ==================== */
+.chart-loading {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 400px;
+    color: var(--color-text-muted);
+}
+
+.loading-spinner {
+    border: 4px solid var(--color-border);
+    border-top: 4px solid var(--color-warm);
+    border-radius: 50%;
+    width: 40px;
+    height: 40px;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+/* ==================== Responsive Design ==================== */
+@media (max-width: 768px) {
+    .kpi-value {
+        font-size: 1.2rem;
+    }
+
+    .kpi-icon {
+        font-size: 1.5rem;
+        margin-right: 0.4rem;
+    }
+
+    .kpi-label {
+        font-size: 0.65rem;
+    }
+
+    .kpi-subtitle {
+        font-size: 0.6rem;
+    }
+
+    .kpi-card .card-body {
+        padding: 0.5rem 0.6rem;
+    }
+
+    .chart-card {
+        margin-bottom: 1rem;
+    }
+
+    .navbar-brand {
+        font-size: 1.2rem;
+    }
+}
+
+/* ==================== Additional Utilities ==================== */
+.text-gradient {
+    background: linear-gradient(135deg, #ff6b6b 0%, #ff8c42 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+
+.card-hover:hover {
+    box-shadow: var(--shadow-lg);
+    transform: translateY(-2px);
+}
+
+.transition-all {
+    transition: all 0.3s ease;
+}
+
+/* ==================== Alarm Status ==================== */
+#alarm-card.alarm-active {
+    border-left: 4px solid var(--color-hot);
+}
+
+#alarm-card.alarm-ok {
+    border-left: 4px solid var(--color-success);
+}
+
+.alarm-icon {
+    font-size: 3rem;
+    margin-bottom: 1rem;
+}
+
+.alarm-active .alarm-icon {
+    color: var(--color-hot);
+    animation: pulse-warning 1.5s infinite;
+}
+
+.alarm-ok .alarm-icon {
+    color: var(--color-success);
+}
+
+.alarm-details {
+    background: rgba(255, 255, 255, 0.05);
+    padding: 1rem;
+    border-radius: 8px;
+    margin: 0.5rem 0;
+}
+
+.alarm-description {
+    font-size: 1.1rem;
+    font-weight: 500;
+}
+
+@keyframes pulse-warning {
+    0%, 100% {
+        opacity: 1;
+        transform: scale(1);
+    }
+    50% {
+        opacity: 0.7;
+        transform: scale(1.1);
+    }
+}
+
+/* ==================== Event Log ==================== */
+.event-item {
+    padding: 0.5rem 0.75rem;
+    border-bottom: 1px solid #dee2e6;
+    transition: background 0.2s;
+}
+
+.event-item:hover {
+    background: rgba(0, 0, 0, 0.02);
+}
+
+.event-item:last-child {
+    border-bottom: none;
+}
+
+.event-time {
+    font-size: 0.85rem;
+    color: #666;
+    font-weight: 500;
+}
+
+.event-type {
+    display: inline-block;
+    padding: 0.15rem 0.5rem;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+}
+
+.event-type.alarm {
+    background: #fee;
+    color: #c00;
+}
+
+.event-type.warning {
+    background: #fff3cd;
+    color: #856404;
+}
+
+.event-type.info {
+    background: #d1ecf1;
+    color: #0c5460;
+}
+
+.event-type.status {
+    background: #e7f5e7;
+    color: #2e7d32;
+}
+
+.event-description {
+    color: #333;
+    font-size: 0.9rem;
+    margin-top: 0.25rem;
+}
+
+.event-value {
+    color: #666;
+    font-size: 0.85rem;
+    font-style: italic;
+}
+
+/* ==================== Sticky Topbar Quick Stats ==================== */
+.topbar-quickstats {
+    background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+    border-bottom: 2px solid #dee2e6;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    z-index: 1020;
+    position: sticky;
+    top: 0;
+}
+
+.topbar-stat {
+    padding: 0.5rem;
+    font-size: 0.9rem;
+    white-space: nowrap;
+}
+
+.topbar-icon {
+    color: #666;
+    font-size: 1rem;
+}
+
+.topbar-label {
+    color: #666;
+    font-weight: 500;
+}
+
+.topbar-value {
+    color: #212529;
+    font-weight: 700;
+    font-size: 1rem;
+}
+
+.topbar-cop {
+    color: #51cf66;
+}
+
+.topbar-status {
+    font-size: 0.85rem;
+}
+
+/* ==================== Status Badges ==================== */
+.status-badge {
+    font-size: 1rem;
+    padding: 0.5rem 1rem;
+    background: #e9ecef;
+    color: #495057;
+    border: none;
+}
+
+.status-badge i {
+    font-size: 0.9rem;
+}
+
+.status-badge-topbar {
+    font-size: 0.85rem;
+    padding: 0.35rem 0.75rem;
+}
+
+.status-badge.status-on {
+    background: #51cf66;
+    color: white;
+}
+
+.status-badge.status-off {
+    background: #adb5bd;
+    color: white;
+}
+
+.status-badge.status-alarm {
+    background: #ff6b6b;
+    color: white;
+    animation: pulse-alarm 1.5s infinite;
+}
+
+@keyframes pulse-alarm {
+    0%, 100% {
+        opacity: 1;
+    }
+    50% {
+        opacity: 0.7;
+    }
+}
+
+/* ==================== Secondary Temperature Cards ==================== */
+.temp-card-secondary {
+    background: white;
+    border-radius: 12px;
+    box-shadow: var(--shadow-md);
+    border-left: 4px solid #dee2e6;
+    transition: all 0.3s ease;
+}
+
+.temp-card-secondary:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 16px rgba(0,0,0,0.15);
+}
+
+.temp-card-secondary .card-body {
+    padding: 1rem;
+}
+
+.secondary-icon {
+    font-size: 1.5rem;
+}
+
+.secondary-title {
+    font-size: 0.85rem;
+    color: #666;
+    font-weight: 600;
+}
+
+.secondary-value {
+    font-size: 1.8rem;
+    font-weight: 700;
+    color: #212529;
+    margin-bottom: 0.25rem;
+}
+
+.minmax-text {
+    font-size: 0.75rem;
+    display: block;
+    color: #868e96;
+}
+
+.sparkline-container {
+    height: 40px;
+    width: 100%;
+}
+
+/* ==================== Hot Water Stats ==================== */
+.hw-stat-box {
+    padding: 1rem;
+    border-radius: 8px;
+    background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+    transition: all 0.3s ease;
+}
+
+.hw-stat-box:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+}
+
+.hw-stat-icon {
+    font-size: 2rem;
+    color: #4dabf7;
+    margin-bottom: 0.5rem;
+}
+
+.hw-stat-value {
+    font-size: 2rem;
+    font-weight: 700;
+    color: #212529;
+    margin: 0;
+}
+
+/* ==================== System Schema ==================== */
+
+/* Rotating animation for pumps */
+@keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
+/* Container for the heatpump display */
+.heatpump-display {
+    position: relative;
+    width: 800px;
+    height: 449px;
+    background-size: contain;
+    background-repeat: no-repeat;
+    margin: 0 auto;
+}
+
+/* Z-index layering: overlays at 10, text at 20 (text always on top) */
+.heatpump-display img[class^="overlay-"] {
+    z-index: 10;
+}
+.heatpump-display div[class^="text-"] {
+    z-index: 20;
+}
+
+/* ===== THERMIA Brand Styles ===== */
+.brand-thermia .heatpump-display {
+    background-image: url('../assets/schema/BV_main_Thermia.png');
+}
+
+/* Thermia overlay positions (adjusted +0.3% left, +0.8% top for alignment) */
+.brand-thermia .overlay-3kw_on {
+    position: absolute;
+    left: 50.80%;
+    top: 27.53%;
+    width: 43px;
+    height: 74px;
+    display: none;
+}
+.brand-thermia .overlay-3kw_on.active {
+    display: block;
+}
+
+.brand-thermia .overlay-BV_komp_anim {
+    position: absolute;
+    left: 22.93%;
+    top: 43.34%;
+    width: 149px;
+    height: 186px;
+    display: none;
+}
+.brand-thermia .overlay-BV_komp_anim.active {
+    display: block;
+}
+
+.brand-thermia .overlay-KB_snurr {
+    position: absolute;
+    left: 0.43%;
+    top: 50.24%;
+    width: 55px;
+    height: 55px;
+    display: none;
+}
+.brand-thermia .overlay-KB_snurr.active {
+    display: block;
+    transform-origin: center;
+    animation: spin 2s linear infinite;
+}
+
+.brand-thermia .overlay-RAD_pil {
+    position: absolute;
+    left: 72.18%;
+    top: 45.34%;
+    width: 83px;
+    height: 77px;
+    display: none;
+}
+.brand-thermia .overlay-RAD_pil.active {
+    display: block;
+}
+
+.brand-thermia .overlay-VV_pil {
+    position: absolute;
+    left: 72.18%;
+    top: 45.34%;
+    width: 83px;
+    height: 77px;
+    display: none;
+}
+.brand-thermia .overlay-VV_pil.active {
+    display: block;
+}
+
+.brand-thermia .overlay-RAD_snurr {
+    position: absolute;
+    left: 46.43%;
+    top: 68.51%;
+    width: 56px;
+    height: 56px;
+    display: none;
+}
+.brand-thermia .overlay-RAD_snurr.active {
+    display: block;
+    transform-origin: center;
+    animation: spin 2s linear infinite;
+}
+
+.brand-thermia .overlay-VV_hot {
+    position: absolute;
+    left: 69.30%;
+    top: 14.83%;
+    width: 102px;
+    height: 138px;
+    display: none;
+}
+.brand-thermia .overlay-VV_hot.active {
+    display: block;
+}
+
+.brand-thermia .overlay-RAD_hot {
+    position: absolute;
+    left: 82.18%;
+    top: 43.56%;
+    width: 142px;
+    height: 166px;
+    display: none;
+}
+.brand-thermia .overlay-RAD_hot.active {
+    display: block;
+}
+
+/* Thermia text positions */
+.brand-thermia .text-outdoor_temp {
+    position: absolute;
+    left: 34.13%;
+    top: 12.92%;
+    font-family: 'Segoe UI', sans-serif;
+    font-size: 14px;
+    font-weight: bold;
+    color: #0d0d0d;
+    white-space: nowrap;
+}
+
+.brand-thermia .text-hotgas_temp {
+    position: absolute;
+    left: 34.25%;
+    top: 19.38%;
+    font-family: 'Segoe UI', sans-serif;
+    font-size: 14px;
+    font-weight: bold;
+    color: #0d0d0d;
+    white-space: nowrap;
+}
+
+.brand-thermia .text-integral_value {
+    position: absolute;
+    left: 35.38%;
+    top: 28.06%;
+    font-family: 'Segoe UI', sans-serif;
+    font-size: 14px;
+    font-weight: bold;
+    color: #0d0d0d;
+    white-space: nowrap;
+}
+
+.brand-thermia .text-KB_in_temp {
+    position: absolute;
+    left: 10.75%;
+    top: 53.23%;
+    font-family: 'Segoe UI', sans-serif;
+    font-size: 16px;
+    font-weight: bold;
+    color: #0d0d0d;
+    white-space: nowrap;
+}
+
+.brand-thermia .text-KB_out_temp {
+    position: absolute;
+    left: 10.88%;
+    top: 71.27%;
+    font-family: 'Segoe UI', sans-serif;
+    font-size: 16px;
+    font-weight: bold;
+    color: #0d0d0d;
+    white-space: nowrap;
+}
+
+.brand-thermia .text-hotwater_temp {
+    position: absolute;
+    left: 72.25%;
+    top: 22.72%;
+    font-family: 'Segoe UI', sans-serif;
+    font-size: 16px;
+    font-weight: bold;
+    color: #0d0d0d;
+    white-space: nowrap;
+}
+
+.brand-thermia .text-radiator_forward_temp {
+    position: absolute;
+    left: 60.50%;
+    top: 53.23%;
+    font-family: 'Segoe UI', sans-serif;
+    font-size: 16px;
+    font-weight: bold;
+    color: #0d0d0d;
+    white-space: nowrap;
+}
+
+.brand-thermia .text-radiator_return_temp {
+    position: absolute;
+    left: 60.62%;
+    top: 71.05%;
+    font-family: 'Segoe UI', sans-serif;
+    font-size: 16px;
+    font-weight: bold;
+    color: #0d0d0d;
+    white-space: nowrap;
+}
+
+/* ===== IVT Brand Styles ===== */
+.brand-ivt .heatpump-display {
+    background-image: url('../assets/schema/BV_main_IVT.png');
+}
+
+/* IVT overlay positions (adjusted +0.3% left, +0.8% top for alignment) */
+.brand-ivt .overlay-3kw_on {
+    position: absolute;
+    left: 50.80%;
+    top: 27.53%;
+    width: 44px;
+    height: 75px;
+    display: none;
+}
+.brand-ivt .overlay-3kw_on.active {
+    display: block;
+}
+
+.brand-ivt .overlay-BV_komp_anim {
+    position: absolute;
+    left: 23.05%;
+    top: 43.56%;
+    width: 149px;
+    height: 186px;
+    display: none;
+}
+.brand-ivt .overlay-BV_komp_anim.active {
+    display: block;
+}
+
+.brand-ivt .overlay-KB_snurr {
+    position: absolute;
+    left: 0.43%;
+    top: 50.02%;
+    width: 55px;
+    height: 55px;
+    display: none;
+}
+.brand-ivt .overlay-KB_snurr.active {
+    display: block;
+    transform-origin: center;
+    animation: spin 2s linear infinite;
+}
+
+.brand-ivt .overlay-RAD_pil {
+    position: absolute;
+    left: 72.18%;
+    top: 45.34%;
+    width: 82px;
+    height: 77px;
+    display: none;
+}
+.brand-ivt .overlay-RAD_pil.active {
+    display: block;
+}
+
+.brand-ivt .overlay-VV_pil {
+    position: absolute;
+    left: 72.18%;
+    top: 45.34%;
+    width: 82px;
+    height: 77px;
+    display: none;
+}
+.brand-ivt .overlay-VV_pil.active {
+    display: block;
+}
+
+.brand-ivt .overlay-RAD_snurr {
+    position: absolute;
+    left: 46.43%;
+    top: 50.47%;
+    width: 56px;
+    height: 56px;
+    display: none;
+}
+.brand-ivt .overlay-RAD_snurr.active {
+    display: block;
+    transform-origin: center;
+    animation: spin 2s linear infinite;
+}
+
+.brand-ivt .overlay-RAD_hot {
+    position: absolute;
+    left: 82.43%;
+    top: 43.78%;
+    width: 139px;
+    height: 162px;
+    display: none;
+}
+.brand-ivt .overlay-RAD_hot.active {
+    display: block;
+}
+
+.brand-ivt .overlay-VB_snurr {
+    position: absolute;
+    left: 46.43%;
+    top: 68.73%;
+    width: 55px;
+    height: 55px;
+    display: none;
+}
+.brand-ivt .overlay-VB_snurr.active {
+    display: block;
+    transform-origin: center;
+    animation: spin 2s linear infinite;
+}
+
+.brand-ivt .overlay-VV_hot {
+    position: absolute;
+    left: 69.30%;
+    top: 14.83%;
+    width: 103px;
+    height: 139px;
+    display: none;
+}
+.brand-ivt .overlay-VV_hot.active {
+    display: block;
+}
+
+/* IVT text positions */
+.brand-ivt .text-outdoor_temp {
+    position: absolute;
+    left: 33.13%;
+    top: 12.25%;
+    font-family: 'Segoe UI', sans-serif;
+    font-size: 16px;
+    font-weight: bold;
+    color: #0d0d0d;
+    white-space: nowrap;
+}
+
+.brand-ivt .text-hotgas_temp {
+    position: absolute;
+    left: 33.88%;
+    top: 20.49%;
+    font-family: 'Segoe UI', sans-serif;
+    font-size: 16px;
+    font-weight: bold;
+    color: #0d0d0d;
+    white-space: nowrap;
+}
+
+.brand-ivt .text-hotwater_temp {
+    position: absolute;
+    left: 72.13%;
+    top: 22.72%;
+    font-family: 'Segoe UI', sans-serif;
+    font-size: 16px;
+    font-weight: bold;
+    color: #0d0d0d;
+    white-space: nowrap;
+}
+
+.brand-ivt .text-KB_in_temp {
+    position: absolute;
+    left: 10.63%;
+    top: 53.23%;
+    font-family: 'Segoe UI', sans-serif;
+    font-size: 16px;
+    font-weight: bold;
+    color: #0d0d0d;
+    white-space: nowrap;
+}
+
+.brand-ivt .text-KB_out_temp {
+    position: absolute;
+    left: 10.75%;
+    top: 71.49%;
+    font-family: 'Segoe UI', sans-serif;
+    font-size: 16px;
+    font-weight: bold;
+    color: #0d0d0d;
+    white-space: nowrap;
+}
+
+.brand-ivt .text-radiator_forward_temp {
+    position: absolute;
+    left: 60.62%;
+    top: 53.23%;
+    font-family: 'Segoe UI', sans-serif;
+    font-size: 16px;
+    font-weight: bold;
+    color: #0d0d0d;
+    white-space: nowrap;
+}
+
+.brand-ivt .text-radiator_return_temp {
+    position: absolute;
+    left: 60.62%;
+    top: 71.05%;
+    font-family: 'Segoe UI', sans-serif;
+    font-size: 16px;
+    font-weight: bold;
+    color: #0d0d0d;
+    white-space: nowrap;
+}
+
+/* ===== Schema Container (legacy support) ===== */
+.schema-container {
+    position: relative;
+    width: 100%;
+    max-width: 800px;
+    margin: 0 auto;
+    background: white;
+    border-radius: 12px;
+    padding: 20px;
+    box-shadow: var(--shadow-sm);
+}
+
+/* ==================== Responsive Design ==================== */
+@media (max-width: 850px) {
+    .heatpump-display {
+        width: 100%;
+        height: auto;
+        aspect-ratio: 800 / 449;
+    }
+
+    /* Scale text sizes for responsive display */
+    .brand-thermia .text-outdoor_temp,
+    .brand-thermia .text-hotgas_temp,
+    .brand-thermia .text-integral_value,
+    .brand-thermia .text-KB_in_temp,
+    .brand-thermia .text-KB_out_temp,
+    .brand-thermia .text-hotwater_temp,
+    .brand-thermia .text-radiator_forward_temp,
+    .brand-thermia .text-radiator_return_temp,
+    .brand-ivt .text-outdoor_temp,
+    .brand-ivt .text-hotgas_temp,
+    .brand-ivt .text-KB_in_temp,
+    .brand-ivt .text-KB_out_temp,
+    .brand-ivt .text-hotwater_temp,
+    .brand-ivt .text-radiator_forward_temp,
+    .brand-ivt .text-radiator_return_temp {
+        font-size: 12px;
+    }
+}
+
+@media (max-width: 768px) {
+    .schema-container {
+        padding: 10px;
+    }
+
+    .schema-temp-box {
+        height: 14px !important;
+        line-height: 14px !important;
+        font-size: 0.6rem !important;
+        padding: 0 3px !important;
+        min-width: 35px !important;
+        border-width: 1px !important;
+    }
+
+    .topbar-quickstats {
+        font-size: 0.85rem;
+    }
+
+    .topbar-value {
+        font-size: 0.9rem;
+    }
+
+    .secondary-value {
+        font-size: 1.4rem;
+    }
+
+    .hw-stat-value {
+        font-size: 1.5rem;
+    }
+
+    /* Scale text sizes for smaller screens */
+    .brand-thermia .text-outdoor_temp,
+    .brand-thermia .text-hotgas_temp,
+    .brand-thermia .text-integral_value,
+    .brand-thermia .text-KB_in_temp,
+    .brand-thermia .text-KB_out_temp,
+    .brand-thermia .text-hotwater_temp,
+    .brand-thermia .text-radiator_forward_temp,
+    .brand-thermia .text-radiator_return_temp,
+    .brand-ivt .text-outdoor_temp,
+    .brand-ivt .text-hotgas_temp,
+    .brand-ivt .text-KB_in_temp,
+    .brand-ivt .text-KB_out_temp,
+    .brand-ivt .text-hotwater_temp,
+    .brand-ivt .text-radiator_forward_temp,
+    .brand-ivt .text-radiator_return_temp {
+        font-size: 10px;
+    }
+}
+
+@media (max-width: 480px) {
+    .schema-temp-box {
+        height: 11px !important;
+        line-height: 11px !important;
+        font-size: 0.5rem !important;
+        padding: 0 2px !important;
+        min-width: 28px !important;
+        border-width: 1px !important;
+    }
+
+    /* Even smaller text for mobile */
+    .brand-thermia .text-outdoor_temp,
+    .brand-thermia .text-hotgas_temp,
+    .brand-thermia .text-integral_value,
+    .brand-thermia .text-KB_in_temp,
+    .brand-thermia .text-KB_out_temp,
+    .brand-thermia .text-hotwater_temp,
+    .brand-thermia .text-radiator_forward_temp,
+    .brand-thermia .text-radiator_return_temp,
+    .brand-ivt .text-outdoor_temp,
+    .brand-ivt .text-hotgas_temp,
+    .brand-ivt .text-KB_in_temp,
+    .brand-ivt .text-KB_out_temp,
+    .brand-ivt .text-hotwater_temp,
+    .brand-ivt .text-radiator_forward_temp,
+    .brand-ivt .text-radiator_return_temp {
+        font-size: 8px;
+    }
+}

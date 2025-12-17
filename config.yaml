@@ -1,0 +1,310 @@
+# Heat Pump Brand Configuration
+# Select your heat pump brand: 'thermia', 'ivt', or 'nibe'
+brand: thermia
+
+mqtt:
+  # MQTT Broker Configuration
+  # For LOCAL broker (included): broker: mosquitto
+  # For EXTERNAL broker: broker: 192.168.1.100 (your MQTT broker IP/hostname)
+  broker: 10.1.40.140
+  port: 1883
+  username: thermia_monitor
+  password: thermia_monitor
+  client_id: thermia_monitor
+
+  # Your H66 MAC address (without colons) - find this in H66 web interface
+  # Example: If H66 shows cd:4d:ee:25:8e:fa then use cd4dee258efa
+  h66_mac: "083a8d015430"
+
+  # Connection settings
+  keepalive: 60
+  qos: 0  # 0=fire and forget, 1=at least once, 2=exactly once
+
+collection:
+  # How often to collect data (in seconds)
+  interval_seconds: 300  # 5 minutes
+
+  # Retry settings for MQTT connection
+  retry_attempts: 5
+  retry_delay: 10
+
+# COP Calculation Settings
+cop:
+  # Flow factor for COP calculation (kW per °C temperature delta)
+  # Formula: Q_radiator = radiator_delta × flow_factor
+  #
+  # Calculate your factor: flow_rate (L/s) × 4.18 (water specific heat)
+  # Examples:
+  #   0.50 L/s → factor 2.09
+  #   0.55 L/s → factor 2.30
+  #   0.60 L/s → factor 2.51
+  #   0.65 L/s → factor 2.72 (default)
+  #   0.70 L/s → factor 2.93
+  #   0.75 L/s → factor 3.14
+  flow_factor: 2.7
+
+# Hot Water Cycle Analysis Settings
+hot_water:
+  # Minimum cycle duration in minutes to count as valid cycle
+  # Cycles shorter than this are filtered out (avoids sensor noise/glitches)
+  # Set to 0 to count all cycles regardless of duration
+  min_cycle_minutes: 2
+
+influxdb:
+  # These are set via environment variables in docker-compose
+  # url: http://influxdb:8086
+  # token: thermia-super-secret-token
+  # org: thermia
+  # bucket: heatpump
+
+  # Batch write settings for better performance
+  batch_size: 100
+  flush_interval: 10
+
+# H66 Register definitions are now defined in brand-specific providers
+# See providers/thermia/registers.py or providers/ivt/registers.py
+# Legacy 'registers' section below is kept for backwards compatibility but will be ignored
+registers_deprecated:
+  # Temperatures
+  "0001":
+    name: "radiator_return"
+    unit: "°C"
+    type: "temperature"
+    description: "Radiator return temperature (from radiators)"
+  
+  "0002":
+    name: "radiator_forward"
+    unit: "°C"
+    type: "temperature"
+    description: "Radiator forward temperature (to radiators)"
+  
+  "0005":
+    name: "brine_in_evaporator"
+    unit: "°C"
+    type: "temperature"
+    description: "Brine in/Evaporator temp (from ground for LW, evaporator for AW/EW)"
+  
+  "0006":
+    name: "brine_out_condenser"
+    unit: "°C"
+    type: "temperature"
+    description: "Brine out/Condenser temp (to ground for LW, condenser for AW/EW)"
+  
+  "0007":
+    name: "outdoor_temp"
+    unit: "°C"
+    type: "temperature"
+    description: "Outdoor temperature sensor"
+  
+  "0008":
+    name: "indoor_temp"
+    unit: "°C"
+    type: "temperature"
+    description: "Indoor temperature (cable connected sensor if installed)"
+  
+  "0009":
+    name: "hot_water_top"
+    unit: "°C"
+    type: "temperature"
+    description: "Hot water tank top sensor"
+  
+  "0012":
+    name: "pressure_tube_temp"
+    unit: "°C"
+    type: "temperature"
+    description: "Temperature after compressor before expansion valve"
+  
+  "0013":
+    name: "cooling_temp"
+    unit: "°C"
+    type: "temperature"
+    description: "Cooling circuit temperature (if installed)"
+  
+  "0107":
+    name: "heating_setpoint"
+    unit: "°C"
+    type: "temperature"
+    description: "Target temperature for heating"
+  
+  # Pump Speeds (Percentage)
+  "3109":
+    name: "circulation_pump_speed"
+    unit: "%"
+    type: "percentage"
+    description: "Variable speed for circulation pump"
+  
+  "3110":
+    name: "brine_pump_speed"
+    unit: "%"
+    type: "percentage"
+    description: "Variable speed for ground source brine pump (LW only)"
+  
+  # Pump Statuses (0=off, 1=on)
+  "1A01":
+    name: "compressor_status"
+    unit: ""
+    type: "status"
+    description: "Compressor on/off status"
+  
+  "1A04":
+    name: "brine_pump_status"
+    unit: ""
+    type: "status"
+    description: "Ground source brine pump status (LW only)"
+  
+  "1A06":
+    name: "radiator_pump_status"
+    unit: ""
+    type: "status"
+    description: "Radiator circulation pump status"
+  
+  "1A07":
+    name: "switch_valve_status"
+    unit: ""
+    type: "status"
+    description: "Switch valve position (0=radiator heating, 1=hot water heating)"
+  
+  # Additional Heat
+  "3104":
+    name: "additional_heat_percent"
+    unit: "%"
+    type: "percentage"
+    description: "Additional electrical heater percentage (typically 9kW max)"
+  
+  # Alarm
+  "1A20":
+    name: "alarm_status"
+    unit: ""
+    type: "alarm"
+    description: "Pump alarm status (0=OK, 1=Alarming)"
+  
+  "2A91":
+    name: "alarm_code"
+    unit: ""
+    type: "alarm"
+    description: "Active alarm code (e.g., 10=HP, 40=Motor protector)"
+  
+  # Settings
+  "2201":
+    name: "operating_mode"
+    unit: ""
+    type: "setting"
+    description: "Operational mode (0=All off, 1=Auto, 2=Normal, 3=Add heat only, 4=Hot water only)"
+  
+  "0203":
+    name: "room_temp_setpoint"
+    unit: "°C"
+    type: "temperature"
+    description: "Room temperature setpoint (if indoor sensor installed)"
+  
+  "2204":
+    name: "room_sensor_influence"
+    unit: "°C"
+    type: "setting"
+    description: "How much room temp should influence heating"
+  
+  "0205":
+    name: "heat_curve_L"
+    unit: "°C"
+    type: "setting"
+    description: "Heat curve setting (CurveL base point)"
+  
+  "0206":
+    name: "heat_curve_R"
+    unit: "°C"
+    type: "setting"
+    description: "Heat curve MAX setting (CurveR)"
+  
+  "0208":
+    name: "hot_water_stop_temp"
+    unit: "°C"
+    type: "temperature"
+    description: "Hot water highest temperature setpoint"
+  
+  "0211":
+    name: "heating_stop_temp"
+    unit: "°C"
+    type: "temperature"
+    description: "Heating stop temperature setpoint"
+  
+  "0212":
+    name: "hot_water_start_temp"
+    unit: "°C"
+    type: "temperature"
+    description: "Hot water lowest temperature setpoint"
+  
+  "0214":
+    name: "cooling_setpoint"
+    unit: "°C"
+    type: "temperature"
+    description: "Cooling temperature level (if installed)"
+  
+  "0217":
+    name: "outdoor_temp_offset"
+    unit: "°C"
+    type: "temperature"
+    description: "Outdoor temperature offset adjustment"
+  
+  "0233":
+    name: "external_control"
+    unit: "°C"
+    type: "setting"
+    description: "Temperature reduction when EVU input has 10kOhm"
+  
+  "8105":
+    name: "degree_minutes"
+    unit: ""
+    type: "setting"
+    description: "Regulation delay variable (integral)"
+  
+  # Runtime Counters
+  "6C60":
+    name: "compressor_runtime"
+    unit: "hours"
+    type: "runtime"
+    description: "Compressor total runtime hours"
+  
+  "6C63":
+    name: "aux_heater_3kw_runtime"
+    unit: "hours"
+    type: "runtime"
+    description: "3kW electrical heater total runtime"
+  
+  "6C64":
+    name: "hot_water_runtime"
+    unit: "hours"
+    type: "runtime"
+    description: "Total time producing hot water"
+  
+  "6C66":
+    name: "aux_heater_6kw_runtime"
+    unit: "hours"
+    type: "runtime"
+    description: "6kW electrical heater total runtime"
+  
+  # Power and Runtime (if available via H66)
+  "CFAA":
+    name: "power_consumption"
+    unit: "W"
+    type: "power"
+    description: "Current power consumption (H66 calculated)"
+  
+  "5FAB":
+    name: "energy_accumulated"
+    unit: "kWh"
+    type: "energy"
+    description: "Accumulated energy consumption (H66 calculated)"
+
+# Dashboard configuration
+dashboard:
+  title: "Thermia Heat Pump Monitor"
+  refresh_interval: 30  # seconds
+  
+  # Time ranges available in dropdown
+  time_ranges:
+    - "1h"
+    - "6h"
+    - "24h"
+    - "7d"
+    - "30d"
+    - "90d"

@@ -1,0 +1,328 @@
+# IVT Greenline Pump Profile
+# Compatible with: IVT Greenline models with Rego 600/637 controllers
+# Reference: https://online.husdata.se/h-docs/C00.pdf
+
+metadata:
+  brand: "IVT"
+  model: "Greenline (Rego 600/637)"
+  controller: "H66 Gateway"
+  documentation: "https://online.husdata.se/h-docs/C00.pdf"
+  supports_power_measurement: false
+  supports_energy_measurement: false
+  note: "Power/Energy must be estimated from runtime data"
+
+registers:
+  # ==================== TEMPERATURES ====================
+  "0001":
+    logical_name: "radiator_return"
+    name: "radiator_return"
+    unit: "°C"
+    type: "temperature"
+    description: "Return water feed from radiators [if installed]"
+  
+  "0002":
+    logical_name: "radiator_forward"
+    name: "radiator_forward"
+    unit: "°C"
+    type: "temperature"
+    description: "Water feed out to radiators"
+  
+  "0003":
+    logical_name: "heat_carrier_return"
+    name: "heat_carrier_return"
+    unit: "°C"
+    type: "temperature"
+    description: "HP internal heat carrier return"
+    brand_specific: true
+  
+  "0004":
+    logical_name: "heat_carrier_forward"
+    name: "heat_carrier_forward"
+    unit: "°C"
+    type: "temperature"
+    description: "HP internal heat supply forward"
+    brand_specific: true
+  
+  "0005":
+    logical_name: "brine_in_evaporator"
+    name: "brine_in_evaporator"
+    unit: "°C"
+    type: "temperature"
+    description: "Supply in from ground source for LW pumps, Evaporator for AW pumps"
+  
+  "0006":
+    logical_name: "brine_out_condenser"
+    name: "brine_out_condenser"
+    unit: "°C"
+    type: "temperature"
+    description: "Supply out to ground source for LW pumps, Condenser for AW pumps"
+  
+  "0007":
+    logical_name: "outdoor_temp"
+    name: "outdoor_temp"
+    unit: "°C"
+    type: "temperature"
+    description: "Outdoor sensor"
+  
+  "0008":
+    logical_name: "indoor_temp"
+    name: "indoor_temp"
+    unit: "°C"
+    type: "temperature"
+    description: "Temp of indoor sensor [if installed]"
+  
+  "0009":
+    logical_name: "hot_water_top"
+    name: "hot_water_top"
+    unit: "°C"
+    type: "temperature"
+    description: "Warm water tank temp GT3 (For internal Tank)"
+  
+  "000A":
+    logical_name: "warm_water_2"
+    name: "warm_water_2"
+    unit: "°C"
+    type: "temperature"
+    description: "Warm water tank temp GT3X (For external tank if installed)"
+    brand_specific: true
+  
+  "000B":
+    logical_name: "hot_gas_temp"
+    name: "hot_gas_temp"
+    unit: "°C"
+    type: "temperature"
+    description: "Hot gas from compressor before expansion valve"
+  
+  # ==================== SETPOINTS ====================
+  "0107":
+    logical_name: "heating_setpoint"
+    name: "heating_setpoint"
+    unit: "°C"
+    type: "temperature"
+    description: "Target temp for heating"
+  
+  "0111":
+    logical_name: "warm_water_setpoint"
+    name: "warm_water_setpoint"
+    unit: "°C"
+    type: "temperature"
+    description: "Target temp for warm tap water"
+  
+  "0203":
+    logical_name: "room_temp_setpoint"
+    name: "room_temp_setpoint"
+    unit: "°C"
+    type: "temperature"
+    description: "Set room temp if Indoor sensor [if installed]"
+  
+  "2204":
+    logical_name: "room_sensor_influence"
+    name: "room_sensor_influence"
+    unit: "°C"
+    type: "setting"
+    description: "Set how much room temp should influence heating (if Indoor sensor installed)"
+  
+  "2205":
+    logical_name: "heat_curve_L"
+    name: "heat_curve_L"
+    unit: ""
+    type: "setting"
+    description: "Set heat curve level"
+  
+  "0207":
+    logical_name: "heat_curve_parallel"
+    name: "heat_curve_parallel"
+    unit: ""
+    type: "setting"
+    description: "Set heat curve parallel offset"
+  
+  "0208":
+    logical_name: "hot_water_stop_temp"
+    name: "hot_water_stop_temp"
+    unit: "°C"
+    type: "temperature"
+    description: "Set stop temp for tap hot water (too high will trigger Pressostat alarm)"
+  
+  "020B":
+    logical_name: "warm_water_diff"
+    name: "warm_water_diff"
+    unit: "°C"
+    type: "temperature"
+    description: "Set tap water start threshold: WW Stop temp-Diff temp = WW start temp"
+  
+  "7209":
+    logical_name: "extra_warm_water_time"
+    name: "extra_warm_water_time"
+    unit: "minutes"
+    type: "setting"
+    description: "Set minutes for the Extra warm water feature to be activated"
+  
+  "1215":
+    logical_name: "elect_heater_switch"
+    name: "elect_heater_switch"
+    unit: ""
+    type: "setting"
+    description: "1=on, 0=off. Turn off Electrical heater (will take effect next time add heater is to start)"
+  
+  "1233":
+    logical_name: "external_control"
+    name: "external_control"
+    unit: ""
+    type: "setting"
+    description: "Activate external control input 1 to block heat pump operations. 1=Activated. 0=Inactivated"
+  
+  "020A":
+    logical_name: "summer_mode_temp"
+    name: "summer_mode_temp"
+    unit: "°C"
+    type: "temperature"
+    description: "Set temp where HP should go into summer mode and only produce Hot Water"
+  
+  "2210":
+    logical_name: "holiday_mode"
+    name: "holiday_mode"
+    unit: "hours"
+    type: "setting"
+    description: "Set 0-30 days for holiday mode to be activated"
+  
+  "12F2":
+    logical_name: "alarm_reset"
+    name: "alarm_reset"
+    unit: ""
+    type: "setting"
+    description: "Set to 0 to execute a cycle that is turning off the pump for 10 seconds and then on again"
+  
+  # ==================== STATUS ====================
+  "1A01":
+    logical_name: "compressor_status"
+    name: "compressor_status"
+    unit: ""
+    type: "status"
+    description: "0=Off, 1=On"
+  
+  "1A02":
+    logical_name: "add_heat_step_1"
+    name: "add_heat_step_1"
+    unit: ""
+    type: "status"
+    description: "0=Off, 1=On. Normally 3kW step"
+    brand_specific: true
+  
+  "1A03":
+    logical_name: "add_heat_step_2"
+    name: "add_heat_step_2"
+    unit: ""
+    type: "status"
+    description: "0=Off, 1=On. Normally 6kW step"
+    brand_specific: true
+  
+  "1A04":
+    logical_name: "brine_pump_status"
+    name: "brine_pump_status"
+    unit: ""
+    type: "status"
+    description: "Ground source pump. 0=Off, 1=On (LW pumps only)"
+  
+  "1A05":
+    logical_name: "pump_heat_circuit"
+    name: "pump_heat_circuit"
+    unit: ""
+    type: "status"
+    description: "Internal circulation pump. 0=Off, 1=On"
+  
+  "1A06":
+    logical_name: "radiator_pump_status"
+    name: "radiator_pump_status"
+    unit: ""
+    type: "status"
+    description: "Radiator pump. 0=Off, 1=On"
+  
+  "1A07":
+    logical_name: "switch_valve_status"
+    name: "switch_valve_status"
+    unit: ""
+    type: "status"
+    description: "Switch valve position 0=Radiator heating, 1=Hot Water heating"
+  
+  # ==================== ALARMS ====================
+  "1A20":
+    logical_name: "alarm_status"
+    name: "alarm_status"
+    unit: ""
+    type: "alarm"
+    description: "Pump alarm. >0 = Alarming"
+  
+  "BA91":
+    logical_name: "alarm_code"
+    name: "alarm_code"
+    unit: ""
+    type: "alarm"
+    description: "Number of the last triggered alarm, even if no active alarm now"
+  
+  # ==================== RUNTIME COUNTERS (DETAILED) ====================
+  "6C55":
+    logical_name: "compressor_runtime_heating"
+    name: "compressor_runtime_heating"
+    unit: "hours"
+    type: "runtime"
+    description: "Compressor runtime for heating"
+    brand_specific: true
+  
+  "6C56":
+    logical_name: "compressor_runtime_hotwater"
+    name: "compressor_runtime_hotwater"
+    unit: "hours"
+    type: "runtime"
+    description: "Compressor runtime for hot water production"
+    brand_specific: true
+  
+  "6C58":
+    logical_name: "aux_runtime_heating"
+    name: "aux_runtime_heating"
+    unit: "hours"
+    type: "runtime"
+    description: "Electrical additional heater runtime for heating"
+    brand_specific: true
+  
+  "6C59":
+    logical_name: "aux_runtime_hotwater"
+    name: "aux_runtime_hotwater"
+    unit: "hours"
+    type: "runtime"
+    description: "Electrical additional heater for hot water production"
+    brand_specific: true
+  
+  # ==================== ADDITIONAL HEAT (Calculated from steps) ====================
+  "3104":
+    logical_name: "additional_heat_percent"
+    name: "additional_heat_percent"
+    unit: "%"
+    type: "percentage"
+    description: "Add heat status - Applied Additional Electrical heater to support compressor. Commonly 9kW max"
+
+# IVT/Rego alarm codes
+alarm_codes:
+  0: "Inget larm"
+  1: "Sensor radiator retur (GT1)"
+  2: "Utomhussensor (GT2)"
+  3: "Sensor varmvatten (GT3)"
+  4: "Blandningsventil sensor (GT4)"
+  5: "Rumsensor (GT5)"
+  6: "Sensor kompressor (GT6)"
+  7: "Sensor värmebärare ut (GT8)"
+  8: "Sensor värmebärare in (GT9)"
+  9: "Sensor köldbärare in (GT10)"
+  10: "Sensor köldbärare ut (GT11)"
+  11: "Kompressorkrets brytare"
+  12: "Elkassett"
+  13: "Pumpkrets brytare (MB2)"
+  14: "Lågtrycksbrytare (LP)"
+  15: "Högtrycksbrytare (HP)"
+  16: "Hög retur VP (GT9)"
+  17: "Värmebärare ut max (GT8)"
+  18: "Köldbärare in under gräns (GT10)"
+  19: "Köldbärare ut under gräns (GT11)"
+  20: "Kompressor överhettning (GT6)"
+  21: "3-fas felaktig ordning"
+  22: "Strömavbrott"
+  23: "Värme delta överskriden"

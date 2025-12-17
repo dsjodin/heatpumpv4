@@ -1,0 +1,534 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ dashboard_title }}</title>
+
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}">
+
+    <!-- ECharts -->
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+
+    <!-- Socket.IO -->
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+</head>
+<body>
+    <!-- Header with View Tabs -->
+    <nav class="navbar navbar-dark main-header">
+        <div class="container-fluid">
+            <div class="d-flex align-items-center">
+                <span class="navbar-brand mb-0 me-4">
+                    <i class="fas fa-fire"></i> {{ brand_name }}
+                </span>
+                <!-- View Tabs -->
+                <ul class="nav nav-pills view-tabs">
+                    <li class="nav-item">
+                        <a class="nav-link active" href="#" data-view="monitor" id="tab-monitor">
+                            <i class="fas fa-desktop me-1"></i> Monitor
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="#" data-view="analys" id="tab-analys">
+                            <i class="fas fa-chart-line me-1"></i> Analys
+                        </a>
+                    </li>
+                </ul>
+            </div>
+            <div class="d-flex align-items-center gap-3">
+                <span class="badge connection-badge" id="connection-status">Ansluter...</span>
+                <span class="text-white small" id="last-update">--</span>
+                <button class="btn btn-sm btn-outline-light" id="btn-refresh">
+                    <i class="fas fa-sync-alt"></i>
+                </button>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Status Bar (visible in both views) -->
+    <div class="status-bar">
+        <div class="container-fluid">
+            <div class="d-flex flex-wrap justify-content-center gap-2">
+                <span class="badge status-pill" id="status-compressor">
+                    <i class="fas fa-cog me-1"></i>Kompressor: <span id="status-comp-text">--</span>
+                </span>
+                <span class="badge status-pill" id="status-brine-pump">
+                    <i class="fas fa-snowflake me-1"></i>Köldbärarpump: <span id="status-brine-text">--</span>
+                </span>
+                <span class="badge status-pill" id="status-radiator-pump">
+                    <i class="fas fa-sun me-1"></i>Radiatorpump: <span id="status-rad-text">--</span>
+                </span>
+                {% if brand == 'ivt' %}
+                <span class="badge status-pill" id="status-vvb-pump">
+                    <i class="fas fa-hot-tub me-1"></i>VVB-pump: <span id="status-vvb-text">--</span>
+                </span>
+                {% endif %}
+                <span class="badge status-pill" id="status-valve">
+                    <i class="fas fa-random me-1"></i>Växelventil: <span id="status-valve-text">--</span>
+                </span>
+                <span class="badge status-pill" id="status-aux">
+                    <i class="fas fa-fire me-1"></i>Tillsatsvärme: <span id="status-aux-text">--</span>
+                </span>
+                <span class="badge status-pill" id="status-alarm-badge">
+                    <i class="fas fa-bell me-1"></i>Larm: <span id="status-alarm-text">OK</span>
+                </span>
+            </div>
+        </div>
+    </div>
+
+    <!-- ==================== MONITOR VIEW ==================== -->
+    <div id="view-monitor" class="view-content active">
+        <div class="container-fluid px-3 py-3">
+            <div class="row g-3">
+                <!-- Left: Live System Schema (60%) -->
+                <div class="col-lg-7">
+                    <div class="card schema-card">
+                        <div class="card-header">
+                            <i class="fas fa-project-diagram me-2"></i>Live Systemschema
+                        </div>
+                        <div class="card-body p-2">
+                            <div class="schema-container brand-{{ brand }}" id="schema-container" data-brand="{{ brand }}">
+                                <div class="heatpump-display" id="heatpump-display">
+                                    <!-- Live Temperature Text Displays -->
+                                    <div class="text-outdoor_temp" id="text-outdoor_temp">--°C</div>
+                                    <div class="text-hotgas_temp" id="text-hotgas_temp">--°C</div>
+                                    {% if brand == 'thermia' %}
+                                    <div class="text-integral_value" id="text-integral_value">--</div>
+                                    {% endif %}
+                                    <div class="text-KB_in_temp" id="text-KB_in_temp">--°C</div>
+                                    <div class="text-KB_out_temp" id="text-KB_out_temp">--°C</div>
+                                    <div class="text-hotwater_temp" id="text-hotwater_temp">--°C</div>
+                                    <div class="text-radiator_forward_temp" id="text-radiator_forward_temp">--°C</div>
+                                    <div class="text-radiator_return_temp" id="text-radiator_return_temp">--°C</div>
+
+                                    <!-- Overlay Images -->
+                                    <img src="{{ url_for('static', filename='assets/schema/3kw-on.png') }}"
+                                         id="overlay-3kw_on" class="overlay-3kw_on" alt="3kW Heater On">
+                                    <img src="{{ url_for('static', filename='assets/schema/BV_komp_anim.png') }}"
+                                         id="overlay-BV_komp_anim" class="overlay-BV_komp_anim" alt="Compressor Running">
+                                    <img src="{{ url_for('static', filename='assets/schema/KB-snurr.png') }}"
+                                         id="overlay-KB_snurr" class="overlay-KB_snurr" alt="Brine Pump Running">
+                                    <img src="{{ url_for('static', filename='assets/schema/RAD-pil.png') }}"
+                                         id="overlay-RAD_pil" class="overlay-RAD_pil" alt="Radiator Valve Arrow">
+                                    <img src="{{ url_for('static', filename='assets/schema/VV-pil.png') }}"
+                                         id="overlay-VV_pil" class="overlay-VV_pil" alt="Hot Water Valve Arrow">
+                                    <img src="{{ url_for('static', filename='assets/schema/RAD-snurr.png') }}"
+                                         id="overlay-RAD_snurr" class="overlay-RAD_snurr" alt="Radiator Pump Running">
+                                    <img src="{{ url_for('static', filename='assets/schema/VV-hot.png') }}"
+                                         id="overlay-VV_hot" class="overlay-VV_hot" alt="Hot Water Active">
+                                    <img src="{{ url_for('static', filename='assets/schema/RAD-hot.png') }}"
+                                         id="overlay-RAD_hot" class="overlay-RAD_hot" alt="Radiator Heating">
+                                    {% if brand == 'ivt' %}
+                                    <img src="{{ url_for('static', filename='assets/schema/VB-snurr.png') }}"
+                                         id="overlay-VB_snurr" class="overlay-VB_snurr" alt="VB Pump Running">
+                                    {% endif %}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Right: Data Panels (40%) -->
+                <div class="col-lg-5">
+                    <!-- Temperature Metric Cards -->
+                    <div class="row g-2 mb-3">
+                        <!-- Simple temps: Ute, Inne, Hetgas, Integral -->
+                        <div class="col-6 col-md-3">
+                            <div class="metric-card metric-outdoor">
+                                <div class="metric-label"><i class="fas fa-cloud"></i> Ute</div>
+                                <div class="metric-value" id="panel-outdoor-temp">--°C</div>
+                            </div>
+                        </div>
+                        <div class="col-6 col-md-3">
+                            <div class="metric-card metric-indoor">
+                                <div class="metric-label"><i class="fas fa-home"></i> Inne</div>
+                                <div class="metric-value" id="panel-indoor-temp">--°C</div>
+                            </div>
+                        </div>
+                        <div class="col-6 col-md-3">
+                            <div class="metric-card metric-hotgas">
+                                <div class="metric-label"><i class="fas fa-fire-flame-curved"></i> Hetgas</div>
+                                <div class="metric-value" id="panel-hotgas">--°C</div>
+                            </div>
+                        </div>
+                        {% if brand == 'thermia' %}
+                        <div class="col-6 col-md-3">
+                            <div class="metric-card metric-integral">
+                                <div class="metric-label"><i class="fas fa-calculator"></i> Integral</div>
+                                <div class="metric-value" id="panel-integral">--</div>
+                            </div>
+                        </div>
+                        {% endif %}
+                    </div>
+
+                    <!-- Extended temps with min/max/avg -->
+                    <div class="row g-2 mb-3">
+                        <!-- Radiator Fram -->
+                        <div class="col-6">
+                            <div class="metric-card metric-rad-forward">
+                                <div class="metric-label"><i class="fas fa-arrow-right"></i> Radiator Fram</div>
+                                <div class="metric-value" id="panel-radiator-forward">--°C</div>
+                                <div class="metric-minmax">
+                                    <span><i class="fas fa-arrow-down"></i> <span id="panel-rad-fwd-min">--</span></span>
+                                    <span>~ <span id="panel-rad-fwd-avg">--</span></span>
+                                    <span><i class="fas fa-arrow-up"></i> <span id="panel-rad-fwd-max">--</span></span>
+                                </div>
+                            </div>
+                        </div>
+                        <!-- Radiator Retur -->
+                        <div class="col-6">
+                            <div class="metric-card metric-rad-return">
+                                <div class="metric-label"><i class="fas fa-arrow-left"></i> Radiator Retur</div>
+                                <div class="metric-value" id="panel-radiator-return">--°C</div>
+                                <div class="metric-minmax">
+                                    <span><i class="fas fa-arrow-down"></i> <span id="panel-rad-ret-min">--</span></span>
+                                    <span>~ <span id="panel-rad-ret-avg">--</span></span>
+                                    <span><i class="fas fa-arrow-up"></i> <span id="panel-rad-ret-max">--</span></span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="row g-2 mb-3">
+                        <!-- KB In -->
+                        <div class="col-6">
+                            <div class="metric-card metric-brine-in">
+                                <div class="metric-label"><i class="fas fa-snowflake"></i> Köldbärare In</div>
+                                <div class="metric-value" id="panel-brine-in">--°C</div>
+                                <div class="metric-minmax">
+                                    <span><i class="fas fa-arrow-down"></i> <span id="panel-brine-in-min">--</span></span>
+                                    <span>~ <span id="panel-brine-in-avg">--</span></span>
+                                    <span><i class="fas fa-arrow-up"></i> <span id="panel-brine-in-max">--</span></span>
+                                </div>
+                            </div>
+                        </div>
+                        <!-- KB Ut -->
+                        <div class="col-6">
+                            <div class="metric-card metric-brine-out">
+                                <div class="metric-label"><i class="fas fa-snowflake"></i> Köldbärare Ut</div>
+                                <div class="metric-value" id="panel-brine-out">--°C</div>
+                                <div class="metric-minmax">
+                                    <span><i class="fas fa-arrow-down"></i> <span id="panel-brine-out-min">--</span></span>
+                                    <span>~ <span id="panel-brine-out-avg">--</span></span>
+                                    <span><i class="fas fa-arrow-up"></i> <span id="panel-brine-out-max">--</span></span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="row g-2 mb-3">
+                        <!-- Varmvatten -->
+                        <div class="col-12">
+                            <div class="metric-card metric-hotwater">
+                                <div class="metric-label"><i class="fas fa-hot-tub"></i> Varmvatten</div>
+                                <div class="metric-value" id="panel-hotwater">--°C</div>
+                                <div class="metric-minmax">
+                                    <span><i class="fas fa-arrow-down"></i> <span id="panel-hw-min">--</span></span>
+                                    <span>~ <span id="panel-hw-avg">--</span></span>
+                                    <span><i class="fas fa-arrow-up"></i> <span id="panel-hw-max">--</span></span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Performance Metric Cards -->
+                    <div class="row g-2 mb-3">
+                        <div class="col-4">
+                            <div class="metric-card metric-power">
+                                <div class="metric-label"><i class="fas fa-bolt"></i> Effekt</div>
+                                <div class="metric-value" id="panel-power">-- W</div>
+                            </div>
+                        </div>
+                        <div class="col-4">
+                            <div class="metric-card metric-cop">
+                                <div class="metric-label"><i class="fas fa-chart-line"></i> SCOP</div>
+                                <div class="metric-value" id="panel-cop">--</div>
+                            </div>
+                        </div>
+                        <div class="col-4">
+                            <div class="metric-card metric-energy">
+                                <div class="metric-label"><i class="fas fa-plug"></i> Energi</div>
+                                <div class="metric-value" id="panel-energy-today">-- kWh</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="row g-2">
+                        <div class="col-4">
+                            <div class="metric-card metric-cost">
+                                <div class="metric-label"><i class="fas fa-coins"></i> Kostnad</div>
+                                <div class="metric-value" id="panel-cost-today">-- kr</div>
+                            </div>
+                        </div>
+                        <div class="col-4">
+                            <div class="metric-card metric-comp-time">
+                                <div class="metric-label"><i class="fas fa-clock"></i> Kompressor</div>
+                                <div class="metric-value" id="panel-comp-runtime">--%</div>
+                            </div>
+                        </div>
+                        <div class="col-4">
+                            <div class="metric-card metric-aux-time">
+                                <div class="metric-label"><i class="fas fa-fire"></i> Tillsats</div>
+                                <div class="metric-value" id="panel-aux-runtime">--%</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Collapsible Event Log -->
+            <div class="row mt-3">
+                <div class="col-12">
+                    <div class="card">
+                        <div class="card-header py-2 collapsible-header" data-bs-toggle="collapse" data-bs-target="#event-log-collapse">
+                            <i class="fas fa-list me-2"></i>Händelselogg
+                            <i class="fas fa-chevron-down float-end collapse-icon"></i>
+                        </div>
+                        <div class="collapse" id="event-log-collapse">
+                            <div class="card-body p-2" id="event-log" style="max-height: 200px; overflow-y: auto;">
+                                <div class="text-center text-muted p-3">
+                                    <i class="fas fa-spinner fa-spin"></i> Laddar händelser...
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ==================== ANALYS VIEW ==================== -->
+    <div id="view-analys" class="view-content" style="display: none;">
+        <div class="container-fluid px-3 py-3">
+            <!-- Controls Row -->
+            <div class="row mb-3">
+                <div class="col-12">
+                    <div class="card">
+                        <div class="card-body py-2">
+                            <div class="row align-items-center">
+                                <div class="col-md-3">
+                                    <label class="form-label small mb-1">Tidsperiod</label>
+                                    <select id="time-range" class="form-select form-select-sm">
+                                        <option value="1h">Senaste timme</option>
+                                        <option value="6h">Senaste 6 timmar</option>
+                                        <option value="24h" selected>Senaste 24 timmar</option>
+                                        <option value="7d">Senaste vecka</option>
+                                        <option value="30d">Senaste månad</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-2">
+                                    <label class="form-label small mb-1">Diagram</label>
+                                    <select id="chart-selector" class="form-select form-select-sm">
+                                        <option value="temperature">Temperaturer</option>
+                                        <option value="power">Effekt</option>
+                                        <option value="energy">Energiflöde</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-2">
+                                    <label class="form-label small mb-1">Elpris (kr/kWh)</label>
+                                    <input type="number" id="price-input" class="form-control form-control-sm" value="2.0" min="0" max="10" step="0.1">
+                                </div>
+                                <div class="col-md-5">
+                                    <label class="form-label small mb-1">Överlägg (visa på/av perioder)</label>
+                                    <div class="d-flex flex-wrap gap-2">
+                                        <div class="form-check form-check-inline">
+                                            <input class="form-check-input overlay-toggle" type="checkbox" id="overlay-compressor" checked>
+                                            <label class="form-check-label small" for="overlay-compressor">Kompressor</label>
+                                        </div>
+                                        <div class="form-check form-check-inline">
+                                            <input class="form-check-input overlay-toggle" type="checkbox" id="overlay-valve" checked>
+                                            <label class="form-check-label small" for="overlay-valve">Växelventil</label>
+                                        </div>
+                                        <div class="form-check form-check-inline">
+                                            <input class="form-check-input overlay-toggle" type="checkbox" id="overlay-aux">
+                                            <label class="form-check-label small" for="overlay-aux">Tillsats</label>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Main Chart -->
+            <div class="row mb-3">
+                <div class="col-12">
+                    <div class="card">
+                        <div class="card-header py-2" id="chart-title">
+                            <i class="fas fa-temperature-high me-2"></i>Temperaturer
+                        </div>
+                        <div class="card-body p-2">
+                            <div id="main-chart" style="height: 500px;"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Series Toggles (for temperature chart) -->
+            <div class="row mb-3" id="series-toggles-row">
+                <div class="col-12">
+                    <div class="card">
+                        <div class="card-body py-2">
+                            <div class="d-flex flex-wrap gap-3 justify-content-center">
+                                <div class="form-check">
+                                    <input class="form-check-input series-toggle" type="checkbox" id="series-radiator-forward" data-series="radiator_forward" checked>
+                                    <label class="form-check-label small" for="series-radiator-forward">
+                                        <span class="legend-color" style="background: #ff6b6b;"></span> Fram
+                                    </label>
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input series-toggle" type="checkbox" id="series-radiator-return" data-series="radiator_return" checked>
+                                    <label class="form-check-label small" for="series-radiator-return">
+                                        <span class="legend-color" style="background: #feca57;"></span> Retur
+                                    </label>
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input series-toggle" type="checkbox" id="series-hotwater" data-series="hot_water_top" checked>
+                                    <label class="form-check-label small" for="series-hotwater">
+                                        <span class="legend-color" style="background: #ff9ff3;"></span> Varmvatten
+                                    </label>
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input series-toggle" type="checkbox" id="series-brine-in" data-series="brine_in_evaporator">
+                                    <label class="form-check-label small" for="series-brine-in">
+                                        <span class="legend-color" style="background: #54a0ff;"></span> KB In
+                                    </label>
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input series-toggle" type="checkbox" id="series-brine-out" data-series="brine_out_condenser">
+                                    <label class="form-check-label small" for="series-brine-out">
+                                        <span class="legend-color" style="background: #00d2d3;"></span> KB Ut
+                                    </label>
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input series-toggle" type="checkbox" id="series-outdoor" data-series="outdoor_temp">
+                                    <label class="form-check-label small" for="series-outdoor">
+                                        <span class="legend-color" style="background: #5f27cd;"></span> Ute
+                                    </label>
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input series-toggle" type="checkbox" id="series-hotgas" data-series="pressure_tube_temp">
+                                    <label class="form-check-label small" for="series-hotgas">
+                                        <span class="legend-color" style="background: #2c3e50;"></span> Hetgas
+                                    </label>
+                                </div>
+                                {% if brand == 'thermia' %}
+                                <div class="form-check">
+                                    <input class="form-check-input series-toggle" type="checkbox" id="series-integral" data-series="degree_minutes">
+                                    <label class="form-check-label small" for="series-integral">
+                                        <span class="legend-color" style="background: #636e72;"></span> Integral
+                                    </label>
+                                </div>
+                                {% endif %}
+                                <div class="form-check">
+                                    <input class="form-check-input series-toggle" type="checkbox" id="series-radiator-delta" data-series="radiator_delta">
+                                    <label class="form-check-label small" for="series-radiator-delta">
+                                        <span class="legend-color" style="background: #e67e22;"></span> Δ Radiator
+                                    </label>
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input series-toggle" type="checkbox" id="series-brine-delta" data-series="brine_delta">
+                                    <label class="form-check-label small" for="series-brine-delta">
+                                        <span class="legend-color" style="background: #9b59b6;"></span> Δ Köldbärare
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Statistics Row -->
+            <div class="row">
+                <div class="col-12">
+                    <div class="card">
+                        <div class="card-header py-2">
+                            <i class="fas fa-chart-bar me-2"></i>Statistik för vald period
+                        </div>
+                        <div class="card-body py-2">
+                            <div class="row text-center">
+                                <div class="col-md-2 col-4 mb-2">
+                                    <div class="stat-mini">
+                                        <div class="stat-label">Min temp</div>
+                                        <div class="stat-value" id="stat-min-temp">--°C</div>
+                                    </div>
+                                </div>
+                                <div class="col-md-2 col-4 mb-2">
+                                    <div class="stat-mini">
+                                        <div class="stat-label">Max temp</div>
+                                        <div class="stat-value" id="stat-max-temp">--°C</div>
+                                    </div>
+                                </div>
+                                <div class="col-md-2 col-4 mb-2">
+                                    <div class="stat-mini">
+                                        <div class="stat-label">Snitt temp</div>
+                                        <div class="stat-value" id="stat-avg-temp">--°C</div>
+                                    </div>
+                                </div>
+                                <div class="col-md-2 col-4 mb-2">
+                                    <div class="stat-mini">
+                                        <div class="stat-label">Kompressor</div>
+                                        <div class="stat-value" id="stat-comp-runtime">--%</div>
+                                    </div>
+                                </div>
+                                <div class="col-md-2 col-4 mb-2">
+                                    <div class="stat-mini">
+                                        <div class="stat-label">Energi</div>
+                                        <div class="stat-value" id="stat-energy">-- kWh</div>
+                                    </div>
+                                </div>
+                                <div class="col-md-2 col-4 mb-2">
+                                    <div class="stat-mini">
+                                        <div class="stat-label">Kostnad</div>
+                                        <div class="stat-value" id="stat-cost">-- kr</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Debug Modal -->
+    <div class="modal fade" id="debugModal" tabindex="-1">
+        <div class="modal-dialog modal-xl modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header bg-dark text-white">
+                    <h5 class="modal-title"><i class="fas fa-bug me-2"></i>Debug: Alla Metrics</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <input type="text" id="debug-search" class="form-control form-control-sm" placeholder="Sök...">
+                    </div>
+                    <div id="debug-content"></div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-sm btn-secondary" id="btn-refresh-debug">
+                        <i class="fas fa-sync"></i> Uppdatera
+                    </button>
+                    <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">Stäng</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bootstrap JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+
+    <!-- JavaScript -->
+    <script src="{{ url_for('static', filename='js/socket-client.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/charts.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/debug.js') }}"></script>
+</body>
+</html>
