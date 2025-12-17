@@ -399,6 +399,49 @@ class HeatPumpProvider(ABC):
         """
         return self.alarm_codes.get(code, f"Unknown alarm: {code}")
 
+    def get_status_field_names(self) -> List[str]:
+        """
+        Return list of field names that are status fields (0/1 values).
+
+        Used by data_query to determine aggregation method (last vs mean).
+
+        Returns:
+            List of field names that are status fields
+        """
+        status_regs = self.get_registers_by_type('status')
+        return [reg_info['name'] for reg_info in status_regs.values()]
+
+    def get_no_division_types(self) -> List[str]:
+        """
+        Return list of register types that should NOT be divided by 10.
+
+        These types store values in their final units (not multiplied by 10).
+
+        Returns:
+            List of type names
+        """
+        return ['status', 'alarm', 'runtime', 'power', 'energy', 'setting', 'current']
+
+    def should_divide_by_10(self, register_id: str) -> bool:
+        """
+        Determine if a register value should be divided by 10.
+
+        Most heat pump APIs deliver temperature values multiplied by 10
+        (e.g., 305 = 30.5°C). This method checks if division is needed.
+
+        Args:
+            register_id: Register ID to check
+
+        Returns:
+            True if value should be divided by 10
+        """
+        reg_info = self.get_register_info(register_id)
+        if not reg_info:
+            return True  # Unknown register, assume division needed
+
+        reg_type = reg_info.get('type', '')
+        return reg_type not in self.get_no_division_types()
+
     def validate_register_value(self, register_id: str, value: float) -> bool:
         """
         Validate if a register value is within expected range.
