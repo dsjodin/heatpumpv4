@@ -94,14 +94,17 @@ brand: thermia
 export HEATPUMP_BRAND=ivt  # eller 'thermia', 'nibe'
 ```
 
-## Gateway & MQTT
+## Gateway & Data Collection
 
-Båda märkena använder **samma H66 gateway** och MQTT-struktur:
+Alla märken använder **samma H66 gateway** och HTTP API:
 
 - Gateway: **H66** (Husdata)
-- MQTT-topics: `<h66_mac>/HP/<register_id>`
-- Data format: Samma
-- InfluxDB: Samma databas
+- Data source: HTTP API (`/api/alldata`)
+- Polling interval: Konfigurerbart (default 30s)
+- InfluxDB: Samma databas för alla märken
+
+**Note**: MQTT-baserad datainsamling har ersatts med HTTP API för bättre
+timestamp-synkronisering och enklare arkitektur.
 
 ## Register-definitioner
 
@@ -220,83 +223,118 @@ Båda märkena använder **samma H66 gateway** och MQTT-struktur:
 
 ## Lägg till nytt märke
 
-För att lägga till ett nytt märke (t.ex. NIBE):
+Tack vare auto-discovery behöver du **inte ändra någon befintlig kod** för att lägga till ett nytt märke!
+
+### Steg för nytt märke (t.ex. Bosch):
 
 1. **Skapa provider-struktur**:
    ```
-   providers/nibe/
-   ├── __init__.py
-   ├── provider.py
-   ├── registers.py
-   ├── alarms.py
-   ├── dashboard_components.py
-   └── callbacks.py
+   providers/bosch/
+   ├── __init__.py           # Tom fil eller exports
+   ├── provider.py           # Måste ha BoschProvider-klass
+   ├── registers.py          # Register-definitioner
+   └── alarms.py             # Larmkoder
    ```
 
-2. **Implementera provider**:
+2. **Implementera provider** (provider.py):
    ```python
-   # providers/nibe/provider.py
-   from ..base import HeatPumpProvider
+   from providers.base import HeatPumpProvider
+   from .registers import BOSCH_REGISTERS
+   from .alarms import BOSCH_ALARM_CODES
 
-   class NIBEProvider(HeatPumpProvider):
+   class BoschProvider(HeatPumpProvider):
        def get_brand_name(self) -> str:
-           return "nibe"
+           return "bosch"
 
        def get_display_name(self) -> str:
-           return "NIBE Fighter"
+           return "Bosch Compress"
 
-       # Implementera alla abstractmethod från base
-       ...
+       def get_registers(self):
+           return BOSCH_REGISTERS
+
+       def get_alarm_codes(self):
+           return BOSCH_ALARM_CODES
+
+       def get_alarm_register_id(self) -> str:
+           return "XXXX"  # Bosch alarm register
+
+       def get_dashboard_title(self) -> str:
+           return "Bosch Heat Pump Monitor"
+
+       def get_runtime_register_ids(self):
+           return {'compressor': 'YYYY', ...}
+
+       def get_auxiliary_heat_config(self):
+           return {'type': 'percentage', 'register': 'ZZZZ', ...}
    ```
 
-3. **Skapa dashboard components**:
+3. **Skapa registers.py**:
    ```python
-   # providers/nibe/dashboard_components.py
-   def create_nibe_specific_section():
-       # Skapa UI-komponenter med unika ID:n (nibe-*)
-       ...
+   BOSCH_REGISTERS = {
+       '0001': {
+           'name': 'radiator_return',
+           'unit': '°C',
+           'type': 'temperature',
+           'description': 'Radiator return'
+       },
+       # ... alla register med 'type' fält
+   }
+
+   def get_registers():
+       return BOSCH_REGISTERS
    ```
 
-4. **Skapa callbacks**:
+4. **Skapa alarms.py**:
    ```python
-   # providers/nibe/callbacks.py
-   def register_nibe_callbacks(app, data_query):
-       @app.callback(Output('nibe-xxx', 'children'), ...)
-       def update_nibe_xxx(n):
-           # Hämta och formatera data
-           ...
+   BOSCH_ALARM_CODES = {
+       0: "Inget larm",
+       1: "Sensor fel",
+       # ...
+   }
+
+   def get_alarm_codes():
+       return BOSCH_ALARM_CODES
    ```
 
-5. **Uppdatera factory**:
-   ```python
-   # providers/__init__.py
-   def get_provider(brand: str):
-       if brand == 'nibe':
-           from .nibe.provider import NIBEProvider
-           return NIBEProvider()
-       ...
-   ```
-
-6. **Uppdatera layout.py**:
-   ```python
-   # dashboard/layout.py
-   elif brand_name == 'nibe':
-       from providers.nibe.dashboard_components import create_nibe_specific_section
-       brand_specific_section = create_nibe_specific_section()
-   ```
-
-7. **Uppdatera app.py**:
-   ```python
-   # dashboard/app.py
-   elif brand_name == 'nibe':
-       from providers.nibe.callbacks import register_nibe_callbacks
-       register_nibe_callbacks(app, data_query)
-   ```
-
-8. **Lägg till i config.yaml**:
+5. **Använd i config.yaml**:
    ```yaml
-   brand: nibe
+   brand: bosch
    ```
+
+**Klart!** Factory auto-discoverar din nya provider.
+
+### Viktigt för register-definitioner
+
+Varje register **måste** ha ett `type` fält för korrekt datahantering:
+
+| Type | Beskrivning | Divideras med 10? |
+|------|-------------|-------------------|
+| `temperature` | Temperatursensorer | Ja |
+| `percentage` | Procentvärden | Ja |
+| `status` | On/Off (0/1) | Nej |
+| `alarm` | Larmkoder | Nej |
+| `runtime` | Drifttimmar | Nej |
+| `power` | Effekt (W/kW) | Nej |
+| `energy` | Energi (kWh) | Nej |
+| `setting` | Inställningar | Nej |
+| `current` | Ström (A) | Nej |
+
+### Dashboard components (optional)
+
+Om du vill ha märkesspecifika UI-komponenter:
+
+```python
+# providers/bosch/dashboard_components.py
+def create_bosch_specific_section():
+    # Skapa UI-komponenter med unika ID:n (bosch-*)
+    ...
+
+# providers/bosch/callbacks.py
+def register_bosch_callbacks(app, data_query):
+    @app.callback(Output('bosch-xxx', 'children'), ...)
+    def update_bosch_xxx(n):
+        ...
+```
 
 ## Körning
 

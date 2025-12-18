@@ -1,14 +1,15 @@
 """
 Heat Pump Data Query & Calculations - Multi-Brand Support
 Handles all InfluxDB queries and advanced calculations
-Supports: Thermia, IVT
+Supports: Thermia, IVT, NIBE (auto-discovered providers)
 
 FEATURES:
-1. Brand-aware alarm codes
-2. Varmvattenberäkning med verklig effekt under cykler
-3. Flexibel aggregering baserat på tidsperiod
-4. Bättre tidshantering i alla beräkningar
-5. Suppression av InfluxDB pivot-varningar (queries fungerar korrekt)
+1. Brand-aware alarm codes (from provider)
+2. Brand-aware status field detection (from provider)
+3. Varmvattenberäkning med verklig effekt under cykler
+4. Flexibel aggregering baserat på tidsperiod
+5. Bättre tidshantering i alla beräkningar
+6. Suppression av InfluxDB pivot-varningar (queries fungerar korrekt)
 """
 
 import os
@@ -122,14 +123,10 @@ class HeatPumpDataQuery:
             aggregation_window: Specifikt aggregeringsfönster (None = automatisk)
         """
         try:
+            # Get status fields from provider (brand-aware)
             # Status fields should use 'last' aggregation, not 'mean'
             # (averaging 0/1 values gives meaningless fractional results)
-            status_fields = [
-                'compressor_status', 'brine_pump_status', 'radiator_pump_status',
-                'pump_cold_circuit', 'pump_heat_circuit', 'pump_radiator',
-                'switch_valve_status', 'switch_valve_1', 'alarm_status',
-                'add_heat_step_1', 'add_heat_step_2'
-            ]
+            status_fields = set(self.provider.get_status_field_names())
 
             # Split metrics into status and non-status
             status_metrics = [m for m in metric_names if m in status_fields]

@@ -154,7 +154,7 @@ class HeatPumpAPICollector:
             logger.error(f"Failed to fetch data from API: {e}")
             raise
 
-    def _convert_value(self, raw_value: int, register_info: Dict[str, Any]) -> float:
+    def _convert_value(self, raw_value: int, register_id: str) -> float:
         """
         Convert raw register value to actual value based on type.
 
@@ -162,34 +162,20 @@ class HeatPumpAPICollector:
         multiplied by 10 (e.g., 305 = 30.5°C). This method converts them
         to actual values before storing in InfluxDB.
 
+        Uses the provider's should_divide_by_10() method to determine
+        conversion - this ensures brand-specific handling.
+
         Args:
             raw_value: Raw integer value from API
-            register_info: Register definition with type info
+            register_id: Register ID for looking up type info
 
         Returns:
             Converted float value
         """
-        reg_type = register_info.get('type', '')
-        reg_name = register_info.get('name', '')
-
-        # Values that should NOT be divided (already in correct units)
-        no_division_types = ['status', 'alarm', 'runtime', 'power', 'energy']
-        no_division_names = [
-            'compressor_status', 'brine_pump_status', 'radiator_pump_status',
-            'pump_cold_circuit', 'pump_heat_circuit', 'pump_radiator',
-            'switch_valve_status', 'switch_valve_1', 'alarm_status', 'alarm_code',
-            'add_heat_step_1', 'add_heat_step_2',
-            'power_consumption', 'accumulated_energy',  # Already in W/kWh
-            'compressor_runtime_heating', 'compressor_runtime_hotwater',
-            'aux_runtime_heating', 'aux_runtime_hotwater'
-        ]
-
-        # Check if this value should NOT be divided
-        if reg_type in no_division_types or reg_name in no_division_names:
-            return float(raw_value)
-
-        # Temperature, percentage, and most other values: divide by 10
-        return raw_value / 10.0
+        # Use provider to determine if division is needed
+        if self.provider.should_divide_by_10(register_id):
+            return raw_value / 10.0
+        return float(raw_value)
 
     def store_data(self, data: Dict[str, int], timestamp: datetime):
         """
@@ -205,14 +191,14 @@ class HeatPumpAPICollector:
             for register_id, value in data.items():
                 register_info = self.registers[register_id]
 
-                # Convert raw value to actual value
-                converted_value = self._convert_value(value, register_info)
+                # Convert raw value to actual value (uses provider for type lookup)
+                converted_value = self._convert_value(value, register_id)
 
                 # Create InfluxDB point with converted value
                 point = Point("heatpump") \
                     .tag("register_id", register_id) \
                     .tag("name", register_info['name']) \
-                    .tag("type", register_info['type']) \
+                    .tag("type", register_info.get('type', 'unknown')) \
                     .field("value", converted_value) \
                     .time(timestamp)
 

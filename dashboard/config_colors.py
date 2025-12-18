@@ -1,40 +1,50 @@
 """
-Thermia Dashboard - Gemensam färgpalett och konstanter
-Används av alla callback-moduler för konsistent styling
+Heat Pump Dashboard - Chart Color Palette
+Common color definitions for all heat pump brands.
+Used by dashboard for consistent chart styling across Thermia, IVT, NIBE, etc.
 """
 
-# ==================== FÄRGPALETT - MAXIMAL KONTRAST ====================
-# Gemensam färgpalett för konsistens över alla grafer
-# UPPDATERAD: Radiatorparet har nu MYCKET mer kontrast
-THERMIA_COLORS = {
-    # Temperaturer - semantiskt meningsfulla färger
-    'outdoor_temp': '#40464a',      # Ljusblå - utetemperatur
-    'indoor_temp': '#4caf50',       # Grön - inomhus bekvämt
-    'hot_water_top': '#174c7a',     # Orange - mycket varmt vatten
-    
-    # Radiator-paret - MAXIMAL KONTRAST (Röd vs Guld)
-    'radiator_forward': '#dc143c',  # Crimson/Djup Röd - VARMAST (framledning)
-    'radiator_return': '#287040',   # Guld/Gul - SVALARE (retur)
-    
-    # Köldbärare-paret - TYDLIG KONTRAST  
-    'brine_in_evaporator': '#e6a930',   # Ljus Cyan/Turkos - IN från mark
-    'brine_out_condenser': '#1565c0',   # Djup Blå - UT till mark (kallare)
-    
-    # Kompressor och system
-    'compressor': '#4caf50',        # Grön - normal drift
-    'aux_heater': '#ffc107',        # Amber/Gul - tillsattsvärme
-    'power': '#9b59b6',             # Lila - effekt
-    
-    # Delta/differenser
-    'delta_brine': '#26c6da',       # Cyan - KB delta
-    'delta_radiator': '#ff5722',    # Djup orange - Radiator delta
-    
+# ==================== CHART COLOR PALETTE ====================
+# Shared color palette for all brands - semantically consistent
+# Colors chosen for maximum contrast and accessibility
+
+CHART_COLORS = {
+    # Temperatures - semantically meaningful colors
+    'outdoor_temp': '#40464a',      # Dark gray - outdoor
+    'indoor_temp': '#4caf50',       # Green - indoor comfort
+    'hot_water_top': '#174c7a',     # Deep blue - hot water
+    'warm_water_top': '#174c7a',    # Alias for NIBE naming
+    'warm_water_mid': '#2196f3',    # Light blue - mid tank
+
+    # Radiator pair - HIGH CONTRAST (Red vs Green)
+    'radiator_forward': '#dc143c',  # Crimson - HOTTEST (forward)
+    'radiator_return': '#287040',   # Forest green - COOLER (return)
+    'heat_carrier_forward': '#dc143c',  # Alias for NIBE
+    'heat_carrier_return': '#287040',   # Alias for NIBE
+
+    # Brine pair - CLEAR CONTRAST
+    'brine_in_evaporator': '#e6a930',   # Gold/Amber - IN from ground
+    'brine_out_condenser': '#1565c0',   # Deep blue - OUT to ground
+
+    # Compressor and system
+    'compressor': '#4caf50',        # Green - normal operation
+    'hot_gas_temp': '#ff5722',      # Deep orange - hot gas
+    'aux_heater': '#ffc107',        # Amber - additional heat
+    'power': '#9b59b6',             # Purple - power
+
+    # Delta/differences
+    'delta_brine': '#26c6da',       # Cyan - brine delta
+    'delta_radiator': '#ff5722',    # Deep orange - radiator delta
+
     # COP
-    'cop': '#4caf50',               # Grön - bra COP
-    'cop_avg': '#ff9800',           # Orange - genomsnitt
+    'cop': '#4caf50',               # Green - good COP
+    'cop_avg': '#ff9800',           # Orange - average
 }
 
-# Linjebredder för grafer
-LINE_WIDTH_NORMAL = 2.5     # Standard linjer
-LINE_WIDTH_THICK = 3.0      # För viktiga linjer
-LINE_WIDTH_THIN = 2.0       # För mindre viktiga linjer
+# Legacy alias for backwards compatibility
+THERMIA_COLORS = CHART_COLORS
+
+# Line widths for charts
+LINE_WIDTH_NORMAL = 2.5     # Standard lines
+LINE_WIDTH_THICK = 3.0      # Important lines
+LINE_WIDTH_THIN = 2.0       # Secondary lines
