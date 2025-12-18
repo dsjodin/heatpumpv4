@@ -297,7 +297,8 @@ def fetch_all_data_batch(time_range):
 
     # OPTIMIZATION: Query visualization metrics with fine aggregation for aligned charts
     # Temperature, COP, and Performance charts need same data points for alignment
-    logger.info(f"  📊 Fetching visualization metrics with fine aggregation...")
+    # Using InfluxDB-side pivot for better performance (no pandas pivot needed)
+    logger.info(f"  📊 Fetching visualization metrics with InfluxDB-side pivot...")
     viz_query_start = time.time()
     viz_metrics = [
         'outdoor_temp', 'indoor_temp', 'radiator_forward', 'radiator_return',
@@ -308,30 +309,13 @@ def fetch_all_data_batch(time_range):
         'degree_minutes'  # Integral for Thermia
     ]
     viz_aggregation = data_query._get_cop_aggregation_window(time_range)
-    viz_df_raw = data_query.query_metrics(viz_metrics, time_range, aggregation_window=viz_aggregation)
+
+    # Use InfluxDB-side pivot - returns wide format directly
+    # Since HTTP API delivers all sensors with synchronized timestamps,
+    # no pandas pivot or ffill needed
+    viz_df_pivot = data_query.query_metrics_wide(viz_metrics, time_range, aggregation_window=viz_aggregation)
     viz_query_elapsed = time.time() - viz_query_start
-    logger.info(f"    ⏱️  Visualization query took {viz_query_elapsed:.2f}s ({viz_aggregation} aggregation)")
-
-    # CRITICAL: Pivot once to create unified timestamp index for all charts
-    logger.info(f"  📊 Creating unified timestamp index for chart alignment...")
-    pivot_start = time.time()
-    viz_df_pivot = viz_df_raw.pivot_table(
-        index='_time',
-        columns='name',
-        values='_value',
-        aggfunc='mean'
-    ).reset_index()
-    pivot_elapsed = time.time() - pivot_start
-    logger.info(f"    ⏱️  Pivot completed in {pivot_elapsed:.2f}s ({len(viz_df_pivot)} timestamps)")
-
-    # Fill small gaps (1-3 missing points) using forward fill
-    # This handles sensors reporting at slightly different times
-    # Only fills small gaps (limit=3) to avoid propagating stale data
-    logger.info(f"  📊 Filling small gaps in sensor data...")
-    fill_start = time.time()
-    viz_df_pivot = viz_df_pivot.ffill(limit=3)
-    fill_elapsed = time.time() - fill_start
-    logger.info(f"    ⏱️  Gap filling completed in {fill_elapsed:.2f}s")
+    logger.info(f"    ⏱️  Visualization query (with pivot) took {viz_query_elapsed:.2f}s ({viz_aggregation} aggregation, {len(viz_df_pivot)} rows)")
 
     # Pre-calculate COP from pivoted data (aligned timestamps guaranteed)
     logger.info(f"  📊 Pre-calculating COP from pivoted data...")

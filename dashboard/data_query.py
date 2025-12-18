@@ -6,30 +6,26 @@ Supports: Thermia, IVT, NIBE (auto-discovered providers)
 FEATURES:
 1. Brand-aware alarm codes (from provider)
 2. Brand-aware status field detection (from provider)
-3. Varmvattenberäkning med verklig effekt under cykler
-4. Flexibel aggregering baserat på tidsperiod
-5. Bättre tidshantering i alla beräkningar
-6. Suppression av InfluxDB pivot-varningar (queries fungerar korrekt)
+3. InfluxDB-side pivot for wide format (no pandas pivot needed)
+4. Varmvattenberäkning med verklig effekt under cykler
+5. Flexibel aggregering baserat på tidsperiod
+6. Bättre tidshantering i alla beräkningar
 """
 
 import os
 import sys
+import time
 import logging
-import warnings
 import yaml
 from typing import List, Dict, Any, Optional
 import pandas as pd
 import numpy as np
 from influxdb_client import InfluxDBClient
-from influxdb_client.client.warnings import MissingPivotFunction
 
 # Add parent directory to path for provider imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from providers import get_provider
-
-# Suppresa InfluxDB pivot-varningar (våra queries fungerar korrekt med pandas)
-warnings.simplefilter("ignore", MissingPivotFunction)
 
 logger = logging.getLogger(__name__)
 
@@ -177,11 +173,121 @@ class HeatPumpDataQuery:
             if results:
                 return pd.concat(results, ignore_index=True)
             return pd.DataFrame()
-            
+
         except Exception as e:
             logger.error(f"Error querying metrics: {e}")
             return pd.DataFrame()
-    
+
+    def query_metrics_wide(self, metric_names: List[str], time_range: str = '24h',
+                           aggregation_window: Optional[str] = None) -> pd.DataFrame:
+        """
+        Query metrics from InfluxDB and return in WIDE format using DB-side pivot.
+
+        Since all data is collected with identical timestamps (HTTP API approach),
+        InfluxDB can pivot directly - no pandas pivot needed.
+
+        Returns DataFrame with columns: _time, metric1, metric2, metric3, ...
+
+        Args:
+            metric_names: List of metrics to fetch
+            time_range: Time period (e.g., '24h', '7d')
+            aggregation_window: Aggregation window (None = automatic)
+
+        Returns:
+            DataFrame in wide format with _time as index column
+        """
+        try:
+            start_time = time.time()
+
+            # Get status fields from provider (brand-aware)
+            status_fields = set(self.provider.get_status_field_names())
+
+            # Determine aggregation window
+            if aggregation_window is None:
+                aggregation_window = self._get_aggregation_window(time_range)
+
+            # Separate aggregation functions for status vs value fields
+            # Status fields use 'last', value fields use 'mean'
+            status_metrics = [m for m in metric_names if m in status_fields]
+            value_metrics = [m for m in metric_names if m not in status_fields]
+
+            # Build query based on which metric types we have
+            # This avoids empty table issues when only one type is requested
+            if value_metrics and status_metrics:
+                # Both types - use union
+                value_filter = ' or '.join([f'r.name == "{m}"' for m in value_metrics])
+                status_filter = ' or '.join([f'r.name == "{m}"' for m in status_metrics])
+
+                query = f'''
+                    value_data = from(bucket: "{self.bucket}")
+                        |> range(start: -{time_range})
+                        |> filter(fn: (r) => r._measurement == "heatpump")
+                        |> filter(fn: (r) => {value_filter})
+                        |> aggregateWindow(every: {aggregation_window}, fn: mean, createEmpty: false)
+
+                    status_data = from(bucket: "{self.bucket}")
+                        |> range(start: -{time_range})
+                        |> filter(fn: (r) => r._measurement == "heatpump")
+                        |> filter(fn: (r) => {status_filter})
+                        |> aggregateWindow(every: {aggregation_window}, fn: last, createEmpty: false)
+
+                    union(tables: [value_data, status_data])
+                        |> pivot(rowKey: ["_time"], columnKey: ["name"], valueColumn: "_value")
+                        |> sort(columns: ["_time"])
+                '''
+            elif value_metrics:
+                # Only value metrics
+                value_filter = ' or '.join([f'r.name == "{m}"' for m in value_metrics])
+
+                query = f'''
+                    from(bucket: "{self.bucket}")
+                        |> range(start: -{time_range})
+                        |> filter(fn: (r) => r._measurement == "heatpump")
+                        |> filter(fn: (r) => {value_filter})
+                        |> aggregateWindow(every: {aggregation_window}, fn: mean, createEmpty: false)
+                        |> pivot(rowKey: ["_time"], columnKey: ["name"], valueColumn: "_value")
+                        |> sort(columns: ["_time"])
+                '''
+            elif status_metrics:
+                # Only status metrics
+                status_filter = ' or '.join([f'r.name == "{m}"' for m in status_metrics])
+
+                query = f'''
+                    from(bucket: "{self.bucket}")
+                        |> range(start: -{time_range})
+                        |> filter(fn: (r) => r._measurement == "heatpump")
+                        |> filter(fn: (r) => {status_filter})
+                        |> aggregateWindow(every: {aggregation_window}, fn: last, createEmpty: false)
+                        |> pivot(rowKey: ["_time"], columnKey: ["name"], valueColumn: "_value")
+                        |> sort(columns: ["_time"])
+                '''
+            else:
+                # No metrics requested
+                logger.warning("query_metrics_wide: No metrics requested")
+                return pd.DataFrame()
+
+            result = self.query_api.query_data_frame(query)
+
+            if isinstance(result, list):
+                result = pd.concat(result, ignore_index=True)
+
+            elapsed = time.time() - start_time
+
+            if not result.empty:
+                # Clean up columns - remove InfluxDB metadata columns we don't need
+                cols_to_drop = ['result', 'table', '_start', '_stop', '_measurement']
+                result = result.drop(columns=[c for c in cols_to_drop if c in result.columns], errors='ignore')
+
+                logger.info(f"query_metrics_wide: {len(result)} rows, {len(result.columns)} columns in {elapsed:.2f}s")
+            else:
+                logger.warning(f"query_metrics_wide: No data returned for {time_range}")
+
+            return result
+
+        except Exception as e:
+            logger.error(f"Error in query_metrics_wide: {e}")
+            return pd.DataFrame()
+
     def get_latest_values(self) -> Dict[str, Any]:
         """Get latest values for all metrics"""
         try:
