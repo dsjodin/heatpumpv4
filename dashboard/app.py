@@ -7,6 +7,7 @@ Supports: Thermia, IVT, NIBE
 
 import os
 import sys
+import time
 import logging
 import yaml
 import math
@@ -250,7 +251,6 @@ def fetch_all_data_parallel(time_range):
 
     OPTIMIZATION: Uses batch fetching for all time ranges to reduce round-trips.
     """
-    import time
     start_time = time.time()
 
     # Use optimized batch fetch for ALL time ranges (much faster)
@@ -265,7 +265,6 @@ def fetch_all_data_batch(time_range):
     This reduces 30d load time from 8s to ~2s by minimizing InfluxDB round-trips.
     Instead of 10 separate queries, we do 1 big query with all metrics.
     """
-    import time
     start_time = time.time()
 
     # List ALL metrics we need (including alarm/status for events)
@@ -699,126 +698,6 @@ def get_performance_data_from_pivot(df_pivot):
         }
     except Exception as e:
         logger.error(f"Error getting performance data from pivot: {e}")
-        return {
-            'brine_delta': [],
-            'radiator_delta': [],
-            'compressor_status': [],
-            'timestamps': []
-        }
-
-
-# DEPRECATED: Old helper functions (kept for compatibility)
-
-def get_cop_data_cached(cached_cop_df):
-    """Extract COP data from pre-calculated COP dataframe (avoids redundant InfluxDB query)"""
-    try:
-        if cached_cop_df.empty or 'estimated_cop' not in cached_cop_df.columns:
-            return {'timestamps': [], 'values': [], 'avg': 0}
-
-        # DON'T drop NaN values - keep timestamps aligned with other charts
-        # Convert NaN to None (becomes null in JSON) for gaps when compressor is off
-        timestamps = cached_cop_df['_time'].astype(str).tolist()
-        values = cached_cop_df['estimated_cop'].replace({float('nan'): None}).tolist()
-
-        # Calculate average only from non-NaN values
-        avg_cop = float(cached_cop_df['estimated_cop'].mean()) if not cached_cop_df['estimated_cop'].isna().all() else 0
-
-        return {
-            'timestamps': timestamps,
-            'values': values,
-            'avg': avg_cop
-        }
-    except Exception as e:
-        logger.error(f"Error getting cached COP data: {e}")
-        return {'timestamps': [], 'values': [], 'avg': 0}
-
-
-def get_temperature_data_from_df(df):
-    """Extract temperature data from pre-fetched dataframe with aligned timestamps"""
-    try:
-        if df.empty:
-            return {'timestamps': []}
-
-        # Pivot dataframe to ensure consistent timestamp index across all metrics
-        df_pivot = df.pivot_table(
-            index='_time',
-            columns='name',
-            values='_value',
-            aggfunc='mean'
-        ).reset_index()
-
-        # Get consistent timestamps from pivoted dataframe
-        timestamps = df_pivot['_time'].astype(str).tolist()
-
-        # Extract each metric with same timestamp index
-        metrics = [
-            'outdoor_temp', 'indoor_temp', 'radiator_forward',
-            'radiator_return', 'hot_water_top',
-            'brine_in_evaporator', 'brine_out_condenser'
-        ]
-
-        result = {'timestamps': timestamps}
-        for metric in metrics:
-            if metric in df_pivot.columns:
-                # Replace NaN with None for JSON null values
-                result[metric] = df_pivot[metric].replace({float('nan'): None}).tolist()
-
-        return result
-    except Exception as e:
-        logger.error(f"Error getting temperature data from df: {e}")
-        return {'timestamps': []}
-
-
-def get_performance_data_from_df(df):
-    """Extract performance data from pre-fetched dataframe with aligned timestamps
-
-    DEPRECATED: Use get_performance_data_from_pivot() with pre-pivoted data
-    OPTIMIZED: Uses vectorized operations instead of iterrows()
-    """
-    try:
-        if df.empty:
-            return {
-                'brine_delta': [],
-                'radiator_delta': [],
-                'compressor_status': [],
-                'timestamps': []
-            }
-
-        # Pivot dataframe to ensure consistent timestamp index
-        df_pivot = df.pivot_table(
-            index='_time',
-            columns='name',
-            values='_value',
-            aggfunc='mean'
-        ).reset_index()
-
-        # Get consistent timestamps
-        timestamps = df_pivot['_time'].astype(str).tolist()
-
-        # Calculate deltas using vectorized operations
-        brine_delta = []
-        radiator_delta = []
-        compressor_status = []
-
-        if 'brine_in_evaporator' in df_pivot.columns and 'brine_out_condenser' in df_pivot.columns:
-            df_pivot['brine_delta_calc'] = df_pivot['brine_in_evaporator'] - df_pivot['brine_out_condenser']
-            brine_delta = _to_chart_data(df_pivot, '_time', 'brine_delta_calc')
-
-        if 'radiator_forward' in df_pivot.columns and 'radiator_return' in df_pivot.columns:
-            df_pivot['radiator_delta_calc'] = df_pivot['radiator_forward'] - df_pivot['radiator_return']
-            radiator_delta = _to_chart_data(df_pivot, '_time', 'radiator_delta_calc')
-
-        if 'compressor_status' in df_pivot.columns:
-            compressor_status = _to_chart_data(df_pivot, '_time', 'compressor_status')
-
-        return {
-            'brine_delta': brine_delta,
-            'radiator_delta': radiator_delta,
-            'compressor_status': compressor_status,
-            'timestamps': timestamps
-        }
-    except Exception as e:
-        logger.error(f"Error getting performance data from df: {e}")
         return {
             'brine_delta': [],
             'radiator_delta': [],
