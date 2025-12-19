@@ -451,6 +451,25 @@ def get_temperature_data_from_pivot(df_pivot):
         if df_pivot.empty:
             return {'timestamps': []}
 
+        # Check if data needs re-pivoting (InfluxDB union+pivot doesn't always work correctly)
+        # Each metric may end up on separate rows instead of being aligned
+        temp_cols = ['radiator_forward', 'radiator_return', 'brine_in_evaporator', 'brine_out_condenser']
+        available_cols = [c for c in temp_cols if c in df_pivot.columns]
+        if available_cols:
+            avg_fill_rate = sum(df_pivot[c].notna().sum() for c in available_cols) / (len(df_pivot) * len(available_cols))
+            if avg_fill_rate < 0.5:  # Less than 50% fill rate suggests unpivoted data
+                logger.info(f"get_temperature_data_from_pivot: Data not properly pivoted (fill rate: {avg_fill_rate:.1%}), re-pivoting...")
+                # Re-pivot using pandas groupby to align metrics by timestamp
+                numeric_cols = df_pivot.select_dtypes(include=[np.number]).columns.tolist()
+                agg_dict = {col: 'mean' for col in numeric_cols if col in df_pivot.columns}
+                # Use 'last' for status columns
+                for status_col in ['compressor_status', 'brine_pump_status', 'radiator_pump_status', 'switch_valve_status']:
+                    if status_col in agg_dict:
+                        agg_dict[status_col] = 'last'
+                if agg_dict:
+                    df_pivot = df_pivot.groupby('_time').agg(agg_dict).reset_index()
+                    logger.info(f"  Re-pivoted to {len(df_pivot)} rows")
+
         # Get consistent timestamps from pivoted dataframe
         timestamps = df_pivot['_time'].astype(str).tolist()
 
@@ -470,14 +489,7 @@ def get_temperature_data_from_pivot(df_pivot):
                 result[metric] = df_pivot[metric].replace({float('nan'): None}).tolist()
 
         # Calculate delta for radiator side (Thermia: radiator, IVT: heat_carrier)
-        # Check for actual data, not just column existence (columns may exist but be empty)
-        # Debug: Log available columns and their data status
-        logger.info(f"get_temperature_data_from_pivot: columns={list(df_pivot.columns)}")
-        for col in ['radiator_forward', 'radiator_return', 'heat_carrier_forward', 'heat_carrier_return', 'brine_in_evaporator', 'brine_out_condenser']:
-            if col in df_pivot.columns:
-                non_null = df_pivot[col].notna().sum()
-                logger.info(f"  {col}: {non_null}/{len(df_pivot)} non-null values")
-
+        # Check for actual data, not just column existence
         has_heat_carrier = ('heat_carrier_forward' in df_pivot.columns and
                            'heat_carrier_return' in df_pivot.columns and
                            df_pivot['heat_carrier_forward'].notna().any() and
@@ -486,8 +498,6 @@ def get_temperature_data_from_pivot(df_pivot):
                        'radiator_return' in df_pivot.columns and
                        df_pivot['radiator_forward'].notna().any() and
                        df_pivot['radiator_return'].notna().any())
-
-        logger.info(f"  has_heat_carrier={has_heat_carrier}, has_radiator={has_radiator}")
 
         if has_heat_carrier:
             # IVT uses heat_carrier
@@ -499,8 +509,6 @@ def get_temperature_data_from_pivot(df_pivot):
             df_pivot['radiator_delta'] = df_pivot['radiator_forward'] - df_pivot['radiator_return']
             result['radiator_delta'] = df_pivot['radiator_delta'].replace({float('nan'): None}).tolist()
             logger.info(f"  Calculated radiator_delta from radiator: {df_pivot['radiator_delta'].notna().sum()} valid values")
-        else:
-            logger.warning("  No radiator/heat_carrier data available for delta calculation")
 
         # Calculate delta for brine/köldbärare side
         has_brine = ('brine_in_evaporator' in df_pivot.columns and
@@ -511,8 +519,6 @@ def get_temperature_data_from_pivot(df_pivot):
             df_pivot['brine_delta'] = df_pivot['brine_in_evaporator'] - df_pivot['brine_out_condenser']
             result['brine_delta'] = df_pivot['brine_delta'].replace({float('nan'): None}).tolist()
             logger.info(f"  Calculated brine_delta: {df_pivot['brine_delta'].notna().sum()} valid values")
-        else:
-            logger.warning("  No brine data available for delta calculation")
 
         return result
     except Exception as e:
@@ -581,6 +587,21 @@ def get_performance_data_from_pivot(df_pivot):
                 'compressor_status': [],
                 'timestamps': []
             }
+
+        # Check if data needs re-pivoting (InfluxDB union+pivot doesn't always work correctly)
+        temp_cols = ['radiator_forward', 'radiator_return', 'brine_in_evaporator', 'brine_out_condenser']
+        available_cols = [c for c in temp_cols if c in df_pivot.columns]
+        if available_cols:
+            avg_fill_rate = sum(df_pivot[c].notna().sum() for c in available_cols) / (len(df_pivot) * len(available_cols))
+            if avg_fill_rate < 0.5:  # Less than 50% fill rate suggests unpivoted data
+                # Re-pivot using pandas groupby to align metrics by timestamp
+                numeric_cols = df_pivot.select_dtypes(include=[np.number]).columns.tolist()
+                agg_dict = {col: 'mean' for col in numeric_cols if col in df_pivot.columns}
+                for status_col in ['compressor_status', 'brine_pump_status', 'radiator_pump_status', 'switch_valve_status']:
+                    if status_col in agg_dict:
+                        agg_dict[status_col] = 'last'
+                if agg_dict:
+                    df_pivot = df_pivot.groupby('_time').agg(agg_dict).reset_index()
 
         # Get consistent timestamps
         timestamps = df_pivot['_time'].astype(str).tolist()
