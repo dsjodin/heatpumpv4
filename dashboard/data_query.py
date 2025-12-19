@@ -625,6 +625,25 @@ class HeatPumpDataQuery:
             if '_time' in df.columns and not pd.api.types.is_datetime64_any_dtype(df['_time']):
                 df['_time'] = pd.to_datetime(df['_time'])
 
+            # Check if data needs re-pivoting (InfluxDB union+pivot doesn't work correctly)
+            # If most values are NaN per column, data isn't properly aligned
+            cop_cols = ['radiator_forward', 'radiator_return', 'power_consumption', 'compressor_status']
+            available_cols = [c for c in cop_cols if c in df.columns]
+            if available_cols:
+                avg_fill_rate = sum(df[c].notna().sum() for c in available_cols) / (len(df) * len(available_cols))
+                if avg_fill_rate < 0.5:  # Less than 50% fill rate suggests unpivoted data
+                    logger.info(f"calculate_cop_from_pivot: Data not properly pivoted (fill rate: {avg_fill_rate:.1%}), re-pivoting...")
+                    # Group by time and aggregate - this aligns all metrics to same timestamp
+                    numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+                    agg_dict = {col: 'mean' for col in numeric_cols if col in df.columns}
+                    # Status columns should use 'last' not 'mean'
+                    for status_col in ['compressor_status', 'brine_pump_status', 'radiator_pump_status', 'switch_valve_status']:
+                        if status_col in agg_dict:
+                            agg_dict[status_col] = 'last'
+                    if agg_dict:
+                        df = df.groupby('_time').agg(agg_dict).reset_index()
+                        logger.info(f"calculate_cop_from_pivot: Re-pivoted to {len(df)} rows")
+
             # Calculate temperature deltas
             # Prefer heat_carrier if available and valid (IVT uses these, radiator sensors may be faulty)
             forward_col = None
