@@ -806,6 +806,8 @@ class HeatPumpDataQuery:
             metrics = [
                 'radiator_forward',
                 'radiator_return',
+                'heat_carrier_forward',  # IVT alternative
+                'heat_carrier_return',   # IVT alternative
                 'brine_in_evaporator',
                 'brine_out_condenser',
                 'power_consumption',
