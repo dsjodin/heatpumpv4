@@ -670,6 +670,12 @@ class HeatPumpDataQuery:
             else:
                 compressor_on = True
 
+            # Debug: Log why valid_mask might be empty
+            delta_valid = df['radiator_delta'].fillna(0) > 0.5
+            power_valid = df['power_consumption'].fillna(0) > 100
+            logger.info(f"calculate_cop_from_pivot: Debug - compressor_on: {compressor_on.sum()}/{len(df)}, delta>0.5: {delta_valid.sum()}/{len(df)}, power>100: {power_valid.sum()}/{len(df)}")
+            logger.info(f"calculate_cop_from_pivot: Debug - radiator_forward mean: {df['radiator_forward'].mean():.1f}, radiator_return mean: {df['radiator_return'].mean():.1f}, delta mean: {df['radiator_delta'].mean():.1f}")
+
             valid_mask = (
                 compressor_on &
                 (df['radiator_delta'].fillna(0) > 0.5) &
