@@ -470,17 +470,31 @@ def get_temperature_data_from_pivot(df_pivot):
                 result[metric] = df_pivot[metric].replace({float('nan'): None}).tolist()
 
         # Calculate delta for radiator side (Thermia: radiator, IVT: heat_carrier)
-        if 'heat_carrier_forward' in df_pivot.columns and 'heat_carrier_return' in df_pivot.columns:
+        # Check for actual data, not just column existence (columns may exist but be empty)
+        has_heat_carrier = ('heat_carrier_forward' in df_pivot.columns and
+                           'heat_carrier_return' in df_pivot.columns and
+                           df_pivot['heat_carrier_forward'].notna().any() and
+                           df_pivot['heat_carrier_return'].notna().any())
+        has_radiator = ('radiator_forward' in df_pivot.columns and
+                       'radiator_return' in df_pivot.columns and
+                       df_pivot['radiator_forward'].notna().any() and
+                       df_pivot['radiator_return'].notna().any())
+
+        if has_heat_carrier:
             # IVT uses heat_carrier
             df_pivot['radiator_delta'] = df_pivot['heat_carrier_forward'] - df_pivot['heat_carrier_return']
             result['radiator_delta'] = df_pivot['radiator_delta'].replace({float('nan'): None}).tolist()
-        elif 'radiator_forward' in df_pivot.columns and 'radiator_return' in df_pivot.columns:
+        elif has_radiator:
             # Thermia uses radiator
             df_pivot['radiator_delta'] = df_pivot['radiator_forward'] - df_pivot['radiator_return']
             result['radiator_delta'] = df_pivot['radiator_delta'].replace({float('nan'): None}).tolist()
 
         # Calculate delta for brine/köldbärare side
-        if 'brine_in_evaporator' in df_pivot.columns and 'brine_out_condenser' in df_pivot.columns:
+        has_brine = ('brine_in_evaporator' in df_pivot.columns and
+                    'brine_out_condenser' in df_pivot.columns and
+                    df_pivot['brine_in_evaporator'].notna().any() and
+                    df_pivot['brine_out_condenser'].notna().any())
+        if has_brine:
             df_pivot['brine_delta'] = df_pivot['brine_in_evaporator'] - df_pivot['brine_out_condenser']
             result['brine_delta'] = df_pivot['brine_delta'].replace({float('nan'): None}).tolist()
 
@@ -556,15 +570,33 @@ def get_performance_data_from_pivot(df_pivot):
         timestamps = df_pivot['_time'].astype(str).tolist()
 
         # Calculate deltas using vectorized operations
+        # Check for actual data, not just column existence
         brine_delta = []
         radiator_delta = []
         compressor_status = []
 
-        if 'brine_in_evaporator' in df_pivot.columns and 'brine_out_condenser' in df_pivot.columns:
+        has_brine = ('brine_in_evaporator' in df_pivot.columns and
+                    'brine_out_condenser' in df_pivot.columns and
+                    df_pivot['brine_in_evaporator'].notna().any() and
+                    df_pivot['brine_out_condenser'].notna().any())
+        if has_brine:
             df_pivot['brine_delta_calc'] = df_pivot['brine_in_evaporator'] - df_pivot['brine_out_condenser']
             brine_delta = _to_chart_data(df_pivot, '_time', 'brine_delta_calc')
 
-        if 'radiator_forward' in df_pivot.columns and 'radiator_return' in df_pivot.columns:
+        # Check for radiator (Thermia) or heat_carrier (IVT) data
+        has_heat_carrier = ('heat_carrier_forward' in df_pivot.columns and
+                           'heat_carrier_return' in df_pivot.columns and
+                           df_pivot['heat_carrier_forward'].notna().any() and
+                           df_pivot['heat_carrier_return'].notna().any())
+        has_radiator = ('radiator_forward' in df_pivot.columns and
+                       'radiator_return' in df_pivot.columns and
+                       df_pivot['radiator_forward'].notna().any() and
+                       df_pivot['radiator_return'].notna().any())
+
+        if has_heat_carrier:
+            df_pivot['radiator_delta_calc'] = df_pivot['heat_carrier_forward'] - df_pivot['heat_carrier_return']
+            radiator_delta = _to_chart_data(df_pivot, '_time', 'radiator_delta_calc')
+        elif has_radiator:
             df_pivot['radiator_delta_calc'] = df_pivot['radiator_forward'] - df_pivot['radiator_return']
             radiator_delta = _to_chart_data(df_pivot, '_time', 'radiator_delta_calc')
 
