@@ -11,8 +11,35 @@ import time
 import logging
 import yaml
 import math
+import subprocess
 import pandas as pd
 from datetime import datetime
+
+# Version info - generated at startup
+def get_version_info():
+    """Get version info from git"""
+    try:
+        commit = subprocess.check_output(
+            ['git', 'rev-parse', '--short', 'HEAD'],
+            stderr=subprocess.DEVNULL
+        ).decode('utf-8').strip()
+
+        # Check if working directory is dirty
+        status = subprocess.check_output(
+            ['git', 'status', '--porcelain'],
+            stderr=subprocess.DEVNULL
+        ).decode('utf-8').strip()
+
+        if status:
+            commit += '-dirty'
+
+        return commit
+    except Exception:
+        return 'unknown'
+
+VERSION = get_version_info()
+BUILD_TIME = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
 from flask import Flask, render_template, jsonify, request
 from flask_socketio import SocketIO, emit
 from flask_cors import CORS
@@ -152,7 +179,9 @@ def get_config():
     return jsonify({
         'brand': provider.get_brand_name(),
         'display_name': provider.get_display_name(),
-        'colors': THERMIA_COLORS
+        'colors': THERMIA_COLORS,
+        'version': VERSION,
+        'build_time': BUILD_TIME
     })
 
 
@@ -1560,6 +1589,7 @@ def background_updates():
 if __name__ == '__main__':
     logger.info("=" * 60)
     logger.info(f"🔥 Starting {provider.get_display_name()} Dashboard")
+    logger.info(f"📦 Version: {VERSION} (built {BUILD_TIME})")
     logger.info("=" * 60)
     logger.info("📊 WebSocket Dashboard with ECharts")
     logger.info(f"🏢 Provider: {provider.get_brand_name()}")
