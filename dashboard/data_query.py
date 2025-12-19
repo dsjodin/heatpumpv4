@@ -17,10 +17,15 @@ import sys
 import time
 import logging
 import yaml
+import warnings
 from typing import List, Dict, Any, Optional
 import pandas as pd
 import numpy as np
 from influxdb_client import InfluxDBClient
+from influxdb_client.client.warnings import MissingPivotFunction
+
+# Suppress InfluxDB pivot warnings (we handle pivoting ourselves)
+warnings.simplefilter("ignore", MissingPivotFunction)
 
 # Add parent directory to path for provider imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
