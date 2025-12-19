@@ -12,6 +12,7 @@ import logging
 import yaml
 import math
 import pandas as pd
+import numpy as np
 from datetime import datetime
 
 # Version info - increment when making changes
