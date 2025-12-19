@@ -16,7 +16,7 @@ import numpy as np
 from datetime import datetime
 
 # Version info - increment when making changes
-VERSION = '1.1.0'
+VERSION = '1.2.0'
 BUILD_TIME = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
 from flask import Flask, render_template, jsonify, request
@@ -504,12 +504,10 @@ def get_temperature_data_from_pivot(df_pivot):
             # IVT uses heat_carrier
             df_pivot['radiator_delta'] = df_pivot['heat_carrier_forward'] - df_pivot['heat_carrier_return']
             result['radiator_delta'] = df_pivot['radiator_delta'].replace({float('nan'): None}).tolist()
-            logger.info(f"  Calculated radiator_delta from heat_carrier: {df_pivot['radiator_delta'].notna().sum()} valid values")
         elif has_radiator:
             # Thermia uses radiator
             df_pivot['radiator_delta'] = df_pivot['radiator_forward'] - df_pivot['radiator_return']
             result['radiator_delta'] = df_pivot['radiator_delta'].replace({float('nan'): None}).tolist()
-            logger.info(f"  Calculated radiator_delta from radiator: {df_pivot['radiator_delta'].notna().sum()} valid values")
 
         # Calculate delta for brine/köldbärare side
         has_brine = ('brine_in_evaporator' in df_pivot.columns and
@@ -519,7 +517,6 @@ def get_temperature_data_from_pivot(df_pivot):
         if has_brine:
             df_pivot['brine_delta'] = df_pivot['brine_in_evaporator'] - df_pivot['brine_out_condenser']
             result['brine_delta'] = df_pivot['brine_delta'].replace({float('nan'): None}).tolist()
-            logger.info(f"  Calculated brine_delta: {df_pivot['brine_delta'].notna().sum()} valid values")
 
         return result
     except Exception as e:
