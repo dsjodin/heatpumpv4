@@ -11,33 +11,11 @@ import time
 import logging
 import yaml
 import math
-import subprocess
 import pandas as pd
 from datetime import datetime
 
-# Version info - generated at startup
-def get_version_info():
-    """Get version info from git"""
-    try:
-        commit = subprocess.check_output(
-            ['git', 'rev-parse', '--short', 'HEAD'],
-            stderr=subprocess.DEVNULL
-        ).decode('utf-8').strip()
-
-        # Check if working directory is dirty
-        status = subprocess.check_output(
-            ['git', 'status', '--porcelain'],
-            stderr=subprocess.DEVNULL
-        ).decode('utf-8').strip()
-
-        if status:
-            commit += '-dirty'
-
-        return commit
-    except Exception:
-        return 'unknown'
-
-VERSION = get_version_info()
+# Version info - increment when making changes
+VERSION = '1.0.0'
 BUILD_TIME = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
 from flask import Flask, render_template, jsonify, request
