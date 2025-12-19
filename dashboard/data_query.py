@@ -611,7 +611,7 @@ class HeatPumpDataQuery:
                 logger.warning("calculate_cop_from_pivot: Empty input dataframe")
                 return pd.DataFrame()
 
-            logger.debug(f"calculate_cop_from_pivot: Input shape {df_pivot.shape}, columns: {list(df_pivot.columns)}")
+            logger.info(f"calculate_cop_from_pivot: Input shape {df_pivot.shape}, columns: {list(df_pivot.columns)}")
 
             # Make a copy to avoid modifying original
             df = df_pivot.copy()
