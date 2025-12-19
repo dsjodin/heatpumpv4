@@ -1379,6 +1379,7 @@ def get_kpi_data(time_range='24h', price_per_kwh=2.0):
             'runtime': {
                 'compressor_hours': runtime_stats.get('compressor_runtime_hours', 0),
                 'compressor_percent': runtime_stats.get('compressor_runtime_percent', 0),
+                'compressor_starts': runtime_stats.get('compressor_starts', 0),
                 'aux_heater_hours': runtime_stats.get('aux_heater_runtime_hours', 0),
                 'aux_heater_percent': runtime_stats.get('aux_heater_runtime_percent', 0),
                 'total_hours': runtime_stats.get('total_hours', 0)
@@ -1396,7 +1397,7 @@ def get_kpi_data(time_range='24h', price_per_kwh=2.0):
         logger.error(f"Error getting KPI data: {e}")
         return {
             'energy': {'total_kwh': 0, 'total_cost': 0, 'avg_power': 0, 'peak_power': 0},
-            'runtime': {'compressor_hours': 0, 'compressor_percent': 0, 'aux_heater_hours': 0, 'aux_heater_percent': 0, 'total_hours': 0},
+            'runtime': {'compressor_hours': 0, 'compressor_percent': 0, 'compressor_starts': 0, 'aux_heater_hours': 0, 'aux_heater_percent': 0, 'total_hours': 0},
             'hot_water': {'total_cycles': 0, 'cycles_per_day': 0, 'avg_duration_minutes': 0, 'avg_energy_kwh': 0}
         }
 
@@ -1417,6 +1418,7 @@ def get_kpi_data_cached(time_range, cached_runtime_stats, cached_hot_water_stats
             'runtime': {
                 'compressor_hours': cached_runtime_stats.get('compressor_runtime_hours', 0),
                 'compressor_percent': cached_runtime_stats.get('compressor_runtime_percent', 0),
+                'compressor_starts': cached_runtime_stats.get('compressor_starts', 0),
                 'aux_heater_hours': cached_runtime_stats.get('aux_heater_runtime_hours', 0),
                 'aux_heater_percent': cached_runtime_stats.get('aux_heater_runtime_percent', 0),
                 'total_hours': cached_runtime_stats.get('total_hours', 0)
@@ -1434,7 +1436,7 @@ def get_kpi_data_cached(time_range, cached_runtime_stats, cached_hot_water_stats
         logger.error(f"Error getting cached KPI data: {e}")
         return {
             'energy': {'total_kwh': 0, 'total_cost': 0, 'avg_power': 0, 'peak_power': 0},
-            'runtime': {'compressor_hours': 0, 'compressor_percent': 0, 'aux_heater_hours': 0, 'aux_heater_percent': 0, 'total_hours': 0},
+            'runtime': {'compressor_hours': 0, 'compressor_percent': 0, 'compressor_starts': 0, 'aux_heater_hours': 0, 'aux_heater_percent': 0, 'total_hours': 0},
             'hot_water': {'total_cycles': 0, 'cycles_per_day': 0, 'avg_duration_minutes': 0, 'avg_energy_kwh': 0}
         }
 

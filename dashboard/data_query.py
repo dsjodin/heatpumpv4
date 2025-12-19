@@ -946,6 +946,7 @@ class HeatPumpDataQuery:
                 return {
                     'compressor_runtime_hours': 0,
                     'compressor_runtime_percent': 0,
+                    'compressor_starts': 0,
                     'aux_heater_runtime_hours': 0,
                     'aux_heater_runtime_percent': 0,
                     'total_hours': 0
@@ -961,6 +962,7 @@ class HeatPumpDataQuery:
                 return {
                     'compressor_runtime_hours': 0,
                     'compressor_runtime_percent': 0,
+                    'compressor_starts': 0,
                     'aux_heater_runtime_hours': 0,
                     'aux_heater_runtime_percent': 0,
                     'total_hours': 0
@@ -987,6 +989,14 @@ class HeatPumpDataQuery:
             
             comp_runtime_hours = comp_runtime_seconds / 3600
             comp_runtime_percent = (comp_runtime_hours / total_hours * 100) if total_hours > 0 else 0
+
+            # Count compressor starts (rising edges: 0→1 transitions)
+            compressor_starts = 0
+            if len(comp_df) > 1:
+                values = comp_df['_value'].values
+                for i in range(1, len(values)):
+                    if values[i] > 0 and values[i-1] <= 0:
+                        compressor_starts += 1
             
             # Auxiliary heater runtime - ANVÄNDER VERKLIG TID
             aux_df = df[df['name'] == 'additional_heat_percent'].copy()
@@ -1012,12 +1022,13 @@ class HeatPumpDataQuery:
             
             logger.info(f"Runtime calculation for {time_range}:")
             logger.info(f"  Total period: {total_hours:.2f} hours")
-            logger.info(f"  Compressor: {comp_runtime_hours:.2f}h ({comp_runtime_percent:.1f}%)")
+            logger.info(f"  Compressor: {comp_runtime_hours:.2f}h ({comp_runtime_percent:.1f}%), {compressor_starts} starts")
             logger.info(f"  Aux heater: {aux_runtime_hours:.2f}h ({aux_runtime_percent:.1f}%)")
-            
+
             return {
                 'compressor_runtime_hours': round(comp_runtime_hours, 1),
                 'compressor_runtime_percent': round(comp_runtime_percent, 1),
+                'compressor_starts': compressor_starts,
                 'aux_heater_runtime_hours': round(aux_runtime_hours, 1),
                 'aux_heater_runtime_percent': round(aux_runtime_percent, 1),
                 'total_hours': round(total_hours, 1)
@@ -1028,6 +1039,7 @@ class HeatPumpDataQuery:
             return {
                 'compressor_runtime_hours': 0,
                 'compressor_runtime_percent': 0,
+                'compressor_starts': 0,
                 'aux_heater_runtime_hours': 0,
                 'aux_heater_runtime_percent': 0,
                 'total_hours': 0

@@ -279,6 +279,9 @@ function updateMonitorPanels(data) {
         if (runtime.compressor_percent !== undefined) {
             setValue('panel-comp-runtime', runtime.compressor_percent, '%');
         }
+        if (runtime.compressor_starts !== undefined) {
+            setValue('panel-comp-starts', runtime.compressor_starts, '', 0);
+        }
         if (runtime.aux_heater_percent !== undefined) {
             setValue('panel-aux-runtime', runtime.aux_heater_percent, '%');
         }

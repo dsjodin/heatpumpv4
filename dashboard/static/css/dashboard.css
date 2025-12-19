@@ -234,6 +234,7 @@ body {
 .metric-energy::before { background: linear-gradient(90deg, #3498db, #5dade2); }
 .metric-cost::before { background: linear-gradient(90deg, #f1c40f, #f4d03f); }
 .metric-comp-time::before { background: linear-gradient(90deg, #9b59b6, #bb8fce); }
+.metric-comp-starts::before { background: linear-gradient(90deg, #1abc9c, #48c9b0); }
 .metric-aux-time::before { background: linear-gradient(90deg, #e74c3c, #ec7063); }
 
 .data-table {
