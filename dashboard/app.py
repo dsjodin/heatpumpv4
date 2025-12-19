@@ -15,7 +15,7 @@ import pandas as pd
 from datetime import datetime
 
 # Version info - increment when making changes
-VERSION = '1.0.0'
+VERSION = '1.1.0'
 BUILD_TIME = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
 from flask import Flask, render_template, jsonify, request

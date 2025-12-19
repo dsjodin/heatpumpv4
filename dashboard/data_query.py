@@ -616,7 +616,7 @@ class HeatPumpDataQuery:
                 logger.warning("calculate_cop_from_pivot: Empty input dataframe")
                 return pd.DataFrame()
 
-            logger.info(f"calculate_cop_from_pivot: Input shape {df_pivot.shape}, columns: {list(df_pivot.columns)}")
+            logger.debug(f"calculate_cop_from_pivot: Input shape {df_pivot.shape}, columns: {list(df_pivot.columns)}")
 
             # Make a copy to avoid modifying original
             df = df_pivot.copy()
@@ -670,16 +670,11 @@ class HeatPumpDataQuery:
                 return pd.DataFrame()
 
             # Create radiator_delta using the selected columns (keeping name for compatibility)
-            # Debug: Check data types and non-null counts
-            logger.info(f"calculate_cop_from_pivot: Debug - {forward_col} dtype: {df[forward_col].dtype}, non-null: {df[forward_col].notna().sum()}/{len(df)}")
-            logger.info(f"calculate_cop_from_pivot: Debug - {return_col} dtype: {df[return_col].dtype}, non-null: {df[return_col].notna().sum()}/{len(df)}")
-
-            # Convert to numeric if needed
+            # Convert to numeric if needed (handles mixed types from InfluxDB)
             df[forward_col] = pd.to_numeric(df[forward_col], errors='coerce')
             df[return_col] = pd.to_numeric(df[return_col], errors='coerce')
 
             df['radiator_delta'] = df[forward_col] - df[return_col]
-            logger.info(f"calculate_cop_from_pivot: Debug - delta non-null: {df['radiator_delta'].notna().sum()}/{len(df)}, sample: {df['radiator_delta'].dropna().head(3).tolist()}")
 
             # Also copy the forward/return values with standard names for groupby later
             df['radiator_forward'] = df[forward_col]
@@ -703,12 +698,6 @@ class HeatPumpDataQuery:
                 compressor_on = df['compressor_status'].fillna(0) > 0
             else:
                 compressor_on = True
-
-            # Debug: Log why valid_mask might be empty
-            delta_valid = df['radiator_delta'].fillna(0) > 0.5
-            power_valid = df['power_consumption'].fillna(0) > 100
-            logger.info(f"calculate_cop_from_pivot: Debug - compressor_on: {compressor_on.sum()}/{len(df)}, delta>0.5: {delta_valid.sum()}/{len(df)}, power>100: {power_valid.sum()}/{len(df)}")
-            logger.info(f"calculate_cop_from_pivot: Debug - radiator_forward mean: {df['radiator_forward'].mean():.1f}, radiator_return mean: {df['radiator_return'].mean():.1f}, delta mean: {df['radiator_delta'].mean():.1f}")
 
             valid_mask = (
                 compressor_on &
