@@ -471,6 +471,13 @@ def get_temperature_data_from_pivot(df_pivot):
 
         # Calculate delta for radiator side (Thermia: radiator, IVT: heat_carrier)
         # Check for actual data, not just column existence (columns may exist but be empty)
+        # Debug: Log available columns and their data status
+        logger.info(f"get_temperature_data_from_pivot: columns={list(df_pivot.columns)}")
+        for col in ['radiator_forward', 'radiator_return', 'heat_carrier_forward', 'heat_carrier_return', 'brine_in_evaporator', 'brine_out_condenser']:
+            if col in df_pivot.columns:
+                non_null = df_pivot[col].notna().sum()
+                logger.info(f"  {col}: {non_null}/{len(df_pivot)} non-null values")
+
         has_heat_carrier = ('heat_carrier_forward' in df_pivot.columns and
                            'heat_carrier_return' in df_pivot.columns and
                            df_pivot['heat_carrier_forward'].notna().any() and
@@ -480,14 +487,20 @@ def get_temperature_data_from_pivot(df_pivot):
                        df_pivot['radiator_forward'].notna().any() and
                        df_pivot['radiator_return'].notna().any())
 
+        logger.info(f"  has_heat_carrier={has_heat_carrier}, has_radiator={has_radiator}")
+
         if has_heat_carrier:
             # IVT uses heat_carrier
             df_pivot['radiator_delta'] = df_pivot['heat_carrier_forward'] - df_pivot['heat_carrier_return']
             result['radiator_delta'] = df_pivot['radiator_delta'].replace({float('nan'): None}).tolist()
+            logger.info(f"  Calculated radiator_delta from heat_carrier: {df_pivot['radiator_delta'].notna().sum()} valid values")
         elif has_radiator:
             # Thermia uses radiator
             df_pivot['radiator_delta'] = df_pivot['radiator_forward'] - df_pivot['radiator_return']
             result['radiator_delta'] = df_pivot['radiator_delta'].replace({float('nan'): None}).tolist()
+            logger.info(f"  Calculated radiator_delta from radiator: {df_pivot['radiator_delta'].notna().sum()} valid values")
+        else:
+            logger.warning("  No radiator/heat_carrier data available for delta calculation")
 
         # Calculate delta for brine/köldbärare side
         has_brine = ('brine_in_evaporator' in df_pivot.columns and
@@ -497,6 +510,9 @@ def get_temperature_data_from_pivot(df_pivot):
         if has_brine:
             df_pivot['brine_delta'] = df_pivot['brine_in_evaporator'] - df_pivot['brine_out_condenser']
             result['brine_delta'] = df_pivot['brine_delta'].replace({float('nan'): None}).tolist()
+            logger.info(f"  Calculated brine_delta: {df_pivot['brine_delta'].notna().sum()} valid values")
+        else:
+            logger.warning("  No brine data available for delta calculation")
 
         return result
     except Exception as e:
