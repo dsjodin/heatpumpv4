@@ -651,7 +651,17 @@ class HeatPumpDataQuery:
                 return pd.DataFrame()
 
             # Create radiator_delta using the selected columns (keeping name for compatibility)
+            # Debug: Check data types and non-null counts
+            logger.info(f"calculate_cop_from_pivot: Debug - {forward_col} dtype: {df[forward_col].dtype}, non-null: {df[forward_col].notna().sum()}/{len(df)}")
+            logger.info(f"calculate_cop_from_pivot: Debug - {return_col} dtype: {df[return_col].dtype}, non-null: {df[return_col].notna().sum()}/{len(df)}")
+
+            # Convert to numeric if needed
+            df[forward_col] = pd.to_numeric(df[forward_col], errors='coerce')
+            df[return_col] = pd.to_numeric(df[return_col], errors='coerce')
+
             df['radiator_delta'] = df[forward_col] - df[return_col]
+            logger.info(f"calculate_cop_from_pivot: Debug - delta non-null: {df['radiator_delta'].notna().sum()}/{len(df)}, sample: {df['radiator_delta'].dropna().head(3).tolist()}")
+
             # Also copy the forward/return values with standard names for groupby later
             df['radiator_forward'] = df[forward_col]
             df['radiator_return'] = df[return_col]
