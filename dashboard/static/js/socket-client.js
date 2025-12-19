@@ -25,6 +25,7 @@ socket.on('connect', () => {
     connected = true;
     updateConnectionStatus(true);
     loadInitialData(currentTimeRange);
+    loadVersionInfo();
 });
 
 socket.on('disconnect', () => {
@@ -65,6 +66,22 @@ async function loadInitialData(timeRange) {
 
     } catch (error) {
         console.error('❌ Failed to load initial data:', error);
+    }
+}
+
+async function loadVersionInfo() {
+    try {
+        const response = await fetch('/api/config');
+        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+
+        const config = await response.json();
+        const versionEl = document.getElementById('version-info');
+        if (versionEl && config.version) {
+            versionEl.textContent = `v${config.version}`;
+            versionEl.title = `Version: ${config.version}\nBuilt: ${config.build_time || 'unknown'}`;
+        }
+    } catch (error) {
+        console.error('Failed to load version info:', error);
     }
 }
 
@@ -261,6 +278,9 @@ function updateMonitorPanels(data) {
         // Backend sends compressor_percent, not compressor_runtime_percent
         if (runtime.compressor_percent !== undefined) {
             setValue('panel-comp-runtime', runtime.compressor_percent, '%');
+        }
+        if (runtime.compressor_starts !== undefined) {
+            setValue('panel-comp-starts', runtime.compressor_starts, '', 0);
         }
         if (runtime.aux_heater_percent !== undefined) {
             setValue('panel-aux-runtime', runtime.aux_heater_percent, '%');

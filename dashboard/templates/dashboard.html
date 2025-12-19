@@ -45,6 +45,7 @@
             <div class="d-flex align-items-center gap-3">
                 <span class="badge connection-badge" id="connection-status">Ansluter...</span>
                 <span class="text-white small" id="last-update">--</span>
+                <span class="text-white-50 small" id="version-info" title="Dashboard version">--</span>
                 <button class="btn btn-sm btn-outline-light" id="btn-refresh">
                     <i class="fas fa-sync-alt"></i>
                 </button>
@@ -261,19 +262,25 @@
                     </div>
 
                     <div class="row g-2">
-                        <div class="col-4">
+                        <div class="col-3">
                             <div class="metric-card metric-cost">
                                 <div class="metric-label"><i class="fas fa-coins"></i> Kostnad</div>
                                 <div class="metric-value" id="panel-cost-today">-- kr</div>
                             </div>
                         </div>
-                        <div class="col-4">
+                        <div class="col-3">
                             <div class="metric-card metric-comp-time">
                                 <div class="metric-label"><i class="fas fa-clock"></i> Kompressor</div>
                                 <div class="metric-value" id="panel-comp-runtime">--%</div>
                             </div>
                         </div>
-                        <div class="col-4">
+                        <div class="col-3">
+                            <div class="metric-card metric-comp-starts">
+                                <div class="metric-label"><i class="fas fa-play"></i> Starter</div>
+                                <div class="metric-value" id="panel-comp-starts">--</div>
+                            </div>
+                        </div>
+                        <div class="col-3">
                             <div class="metric-card metric-aux-time">
                                 <div class="metric-label"><i class="fas fa-fire"></i> Tillsats</div>
                                 <div class="metric-value" id="panel-aux-runtime">--%</div>

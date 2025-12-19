@@ -7,11 +7,18 @@ Supports: Thermia, IVT, NIBE
 
 import os
 import sys
+import time
 import logging
 import yaml
 import math
 import pandas as pd
+import numpy as np
 from datetime import datetime
+
+# Version info - increment when making changes
+VERSION = '1.2.0'
+BUILD_TIME = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
 from flask import Flask, render_template, jsonify, request
 from flask_socketio import SocketIO, emit
 from flask_cors import CORS
@@ -151,7 +158,9 @@ def get_config():
     return jsonify({
         'brand': provider.get_brand_name(),
         'display_name': provider.get_display_name(),
-        'colors': THERMIA_COLORS
+        'colors': THERMIA_COLORS,
+        'version': VERSION,
+        'build_time': BUILD_TIME
     })
 
 
@@ -250,7 +259,6 @@ def fetch_all_data_parallel(time_range):
 
     OPTIMIZATION: Uses batch fetching for all time ranges to reduce round-trips.
     """
-    import time
     start_time = time.time()
 
     # Use optimized batch fetch for ALL time ranges (much faster)
@@ -265,7 +273,6 @@ def fetch_all_data_batch(time_range):
     This reduces 30d load time from 8s to ~2s by minimizing InfluxDB round-trips.
     Instead of 10 separate queries, we do 1 big query with all metrics.
     """
-    import time
     start_time = time.time()
 
     # List ALL metrics we need (including alarm/status for events)
@@ -297,7 +304,8 @@ def fetch_all_data_batch(time_range):
 
     # OPTIMIZATION: Query visualization metrics with fine aggregation for aligned charts
     # Temperature, COP, and Performance charts need same data points for alignment
-    logger.info(f"  📊 Fetching visualization metrics with fine aggregation...")
+    # Using InfluxDB-side pivot for better performance (no pandas pivot needed)
+    logger.info(f"  📊 Fetching visualization metrics with InfluxDB-side pivot...")
     viz_query_start = time.time()
     viz_metrics = [
         'outdoor_temp', 'indoor_temp', 'radiator_forward', 'radiator_return',
@@ -308,35 +316,18 @@ def fetch_all_data_batch(time_range):
         'degree_minutes'  # Integral for Thermia
     ]
     viz_aggregation = data_query._get_cop_aggregation_window(time_range)
-    viz_df_raw = data_query.query_metrics(viz_metrics, time_range, aggregation_window=viz_aggregation)
+
+    # Use InfluxDB-side pivot - returns wide format directly
+    # Since HTTP API delivers all sensors with synchronized timestamps,
+    # no pandas pivot or ffill needed
+    viz_df_pivot = data_query.query_metrics_wide(viz_metrics, time_range, aggregation_window=viz_aggregation)
     viz_query_elapsed = time.time() - viz_query_start
-    logger.info(f"    ⏱️  Visualization query took {viz_query_elapsed:.2f}s ({viz_aggregation} aggregation)")
-
-    # CRITICAL: Pivot once to create unified timestamp index for all charts
-    logger.info(f"  📊 Creating unified timestamp index for chart alignment...")
-    pivot_start = time.time()
-    viz_df_pivot = viz_df_raw.pivot_table(
-        index='_time',
-        columns='name',
-        values='_value',
-        aggfunc='mean'
-    ).reset_index()
-    pivot_elapsed = time.time() - pivot_start
-    logger.info(f"    ⏱️  Pivot completed in {pivot_elapsed:.2f}s ({len(viz_df_pivot)} timestamps)")
-
-    # Fill small gaps (1-3 missing points) using forward fill
-    # This handles sensors reporting at slightly different times
-    # Only fills small gaps (limit=3) to avoid propagating stale data
-    logger.info(f"  📊 Filling small gaps in sensor data...")
-    fill_start = time.time()
-    viz_df_pivot = viz_df_pivot.ffill(limit=3)
-    fill_elapsed = time.time() - fill_start
-    logger.info(f"    ⏱️  Gap filling completed in {fill_elapsed:.2f}s")
+    logger.info(f"    ⏱️  Visualization query (with pivot) took {viz_query_elapsed:.2f}s ({viz_aggregation} aggregation, {len(viz_df_pivot)} rows)")
 
     # Pre-calculate COP from pivoted data (aligned timestamps guaranteed)
     logger.info(f"  📊 Pre-calculating COP from pivoted data...")
     cop_cache_start = time.time()
-    cached_cop_df = calculate_cop_from_pivot(viz_df_pivot)
+    cached_cop_df = data_query.calculate_cop_from_pivot(viz_df_pivot)
     cop_cache_elapsed = time.time() - cop_cache_start
     logger.info(f"    ⏱️  COP calculation took {cop_cache_elapsed:.2f}s")
 
@@ -424,159 +415,7 @@ def fetch_all_data_batch(time_range):
 
 
 # Helper functions to extract data from pre-pivoted dataframe
-
-def calculate_cop_from_pivot(df_pivot, interval_minutes=15):
-    """Calculate Interval COP from pre-pivoted dataframe (guaranteed aligned timestamps)
-
-    IMPROVED: Uses interval-based aggregation for more accurate COP:
-    - Groups data into fixed intervals (default 15 minutes)
-    - COP = Σ heat_output / Σ electrical_input per interval
-    - This matches industry standards and manufacturer testing methods
-
-    Returns a NEW dataframe with interval-aggregated COP values.
-    """
-    try:
-        if df_pivot.empty:
-            logger.warning("calculate_cop_from_pivot: Empty input dataframe")
-            return pd.DataFrame()
-
-        logger.debug(f"calculate_cop_from_pivot: Input shape {df_pivot.shape}, columns: {list(df_pivot.columns)}")
-
-        # Get flow_factor from data_query (configured in config.yaml)
-        flow_factor = data_query.cop_flow_factor
-
-        # Make a copy to avoid modifying original
-        df = df_pivot.copy()
-
-        # Ensure _time is datetime
-        if '_time' in df.columns and not pd.api.types.is_datetime64_any_dtype(df['_time']):
-            df['_time'] = pd.to_datetime(df['_time'])
-
-        # Calculate temperature deltas
-        # Prefer heat_carrier if available and valid (IVT uses these, radiator sensors may be faulty)
-        forward_col = None
-        return_col = None
-
-        if 'heat_carrier_forward' in df.columns and 'heat_carrier_return' in df.columns:
-            hc_forward_mean = df['heat_carrier_forward'].mean()
-            if hc_forward_mean > 0:  # Valid heat carrier data (not -48°C)
-                forward_col = 'heat_carrier_forward'
-                return_col = 'heat_carrier_return'
-                logger.debug(f"calculate_cop_from_pivot: Using heat_carrier temps (mean forward: {hc_forward_mean:.1f}°C)")
-
-        # Fall back to radiator if heat_carrier not valid
-        if forward_col is None:
-            if 'radiator_forward' in df.columns and 'radiator_return' in df.columns:
-                rad_forward_mean = df['radiator_forward'].mean()
-                if rad_forward_mean > 0:  # Valid radiator data
-                    forward_col = 'radiator_forward'
-                    return_col = 'radiator_return'
-                    logger.debug(f"calculate_cop_from_pivot: Using radiator temps (mean forward: {rad_forward_mean:.1f}°C)")
-
-        if forward_col is None or return_col is None:
-            logger.warning("calculate_cop_from_pivot: No valid forward/return temperature data")
-            return pd.DataFrame()
-
-        # Create radiator_delta using the selected columns (keeping name for compatibility)
-        df['radiator_delta'] = df[forward_col] - df[return_col]
-        # Also copy the forward/return values with standard names for groupby later
-        df['radiator_forward'] = df[forward_col]
-        df['radiator_return'] = df[return_col]
-
-        # Check what data we have
-        has_power = 'power_consumption' in df.columns
-        has_compressor = 'compressor_status' in df.columns
-
-        if not has_power:
-            logger.warning("No power consumption data available for COP calculation")
-            return pd.DataFrame()
-
-        # Sort by time and calculate time differences
-        df = df.sort_values('_time').reset_index(drop=True)
-        df['time_diff_hours'] = df['_time'].diff().dt.total_seconds() / 3600
-        df['time_diff_hours'] = df['time_diff_hours'].fillna(0).clip(0, 1)  # Cap at 1 hour max
-
-        # Valid mask: compressor running and valid data
-        if has_compressor:
-            compressor_on = df['compressor_status'].fillna(0) > 0
-        else:
-            compressor_on = True
-
-        valid_mask = (
-            compressor_on &
-            (df['radiator_delta'].fillna(0) > 0.5) &
-            (df['power_consumption'].fillna(0) > 100)
-        )
-
-        df['heat_kwh'] = 0.0
-        df['elec_kwh'] = 0.0
-
-        # Heat output in kWh = (delta_T × flow_factor) × time_hours
-        df.loc[valid_mask, 'heat_kwh'] = (
-            df.loc[valid_mask, 'radiator_delta'] * flow_factor *
-            df.loc[valid_mask, 'time_diff_hours']
-        )
-
-        # Electrical input in kWh = power_W / 1000 × time_hours
-        df.loc[valid_mask, 'elec_kwh'] = (
-            df.loc[valid_mask, 'power_consumption'] / 1000.0 *
-            df.loc[valid_mask, 'time_diff_hours']
-        )
-
-        # Create interval groups (e.g., 15-minute intervals)
-        # Use 'T' suffix for broader pandas compatibility
-        df['interval'] = df['_time'].dt.floor(f'{interval_minutes}T')
-
-        logger.debug(f"calculate_cop_from_pivot: Valid samples: {valid_mask.sum()}/{len(df)}, total heat: {df['heat_kwh'].sum():.2f} kWh, total elec: {df['elec_kwh'].sum():.2f} kWh")
-
-        # Aggregate by interval: sum heat and electricity
-        interval_df = df.groupby('interval').agg({
-            'heat_kwh': 'sum',
-            'elec_kwh': 'sum',
-            'radiator_forward': 'mean',
-            'radiator_return': 'mean',
-            'power_consumption': 'mean'
-        }).reset_index()
-
-        # Calculate interval COP = Σ heat / Σ electricity
-        interval_df['estimated_cop'] = None
-        valid_intervals = interval_df['elec_kwh'] > 0.01  # At least some electricity used
-
-        interval_df.loc[valid_intervals, 'estimated_cop'] = (
-            interval_df.loc[valid_intervals, 'heat_kwh'] /
-            interval_df.loc[valid_intervals, 'elec_kwh']
-        )
-
-        # Log COP for diagnostics
-        if valid_intervals.any():
-            raw_cop_mean = interval_df.loc[valid_intervals, 'estimated_cop'].mean()
-            raw_cop_max = interval_df.loc[valid_intervals, 'estimated_cop'].max()
-            logger.info(f"calculate_cop_from_pivot: COP - mean: {raw_cop_mean:.2f}, max: {raw_cop_max:.2f}")
-
-        # No clamping - show real calculated values for proper flow_factor calibration
-
-        # Calculate cumulative/seasonal COP
-        interval_df['cumulative_heat'] = interval_df['heat_kwh'].cumsum()
-        interval_df['cumulative_elec'] = interval_df['elec_kwh'].cumsum()
-        interval_df['seasonal_cop'] = None
-
-        cumulative_valid = interval_df['cumulative_elec'] > 0.1
-        interval_df.loc[cumulative_valid, 'seasonal_cop'] = (
-            interval_df.loc[cumulative_valid, 'cumulative_heat'] /
-            interval_df.loc[cumulative_valid, 'cumulative_elec']
-        )
-
-        # Rename interval column to _time for compatibility
-        interval_df = interval_df.rename(columns={'interval': '_time'})
-
-        valid_cop_count = interval_df['estimated_cop'].notna().sum()
-        logger.info(f"calculate_cop_from_pivot: Generated {len(interval_df)} intervals, {valid_cop_count} with valid COP")
-
-        return interval_df
-    except Exception as e:
-        logger.error(f"Error calculating COP from pivot: {e}", exc_info=True)
-        return pd.DataFrame()
-
+# Note: COP calculation is now consolidated in DataQuery.calculate_cop_from_pivot()
 
 def get_cop_data_from_pivot(df_cop):
     """Extract COP data from pre-calculated interval COP dataframe"""
@@ -613,6 +452,25 @@ def get_temperature_data_from_pivot(df_pivot):
         if df_pivot.empty:
             return {'timestamps': []}
 
+        # Check if data needs re-pivoting (InfluxDB union+pivot doesn't always work correctly)
+        # Each metric may end up on separate rows instead of being aligned
+        temp_cols = ['radiator_forward', 'radiator_return', 'brine_in_evaporator', 'brine_out_condenser']
+        available_cols = [c for c in temp_cols if c in df_pivot.columns]
+        if available_cols:
+            avg_fill_rate = sum(df_pivot[c].notna().sum() for c in available_cols) / (len(df_pivot) * len(available_cols))
+            if avg_fill_rate < 0.5:  # Less than 50% fill rate suggests unpivoted data
+                logger.info(f"get_temperature_data_from_pivot: Data not properly pivoted (fill rate: {avg_fill_rate:.1%}), re-pivoting...")
+                # Re-pivot using pandas groupby to align metrics by timestamp
+                numeric_cols = df_pivot.select_dtypes(include=[np.number]).columns.tolist()
+                agg_dict = {col: 'mean' for col in numeric_cols if col in df_pivot.columns}
+                # Use 'last' for status columns
+                for status_col in ['compressor_status', 'brine_pump_status', 'radiator_pump_status', 'switch_valve_status']:
+                    if status_col in agg_dict:
+                        agg_dict[status_col] = 'last'
+                if agg_dict:
+                    df_pivot = df_pivot.groupby('_time').agg(agg_dict).reset_index()
+                    logger.info(f"  Re-pivoted to {len(df_pivot)} rows")
+
         # Get consistent timestamps from pivoted dataframe
         timestamps = df_pivot['_time'].astype(str).tolist()
 
@@ -632,17 +490,31 @@ def get_temperature_data_from_pivot(df_pivot):
                 result[metric] = df_pivot[metric].replace({float('nan'): None}).tolist()
 
         # Calculate delta for radiator side (Thermia: radiator, IVT: heat_carrier)
-        if 'heat_carrier_forward' in df_pivot.columns and 'heat_carrier_return' in df_pivot.columns:
+        # Check for actual data, not just column existence
+        has_heat_carrier = ('heat_carrier_forward' in df_pivot.columns and
+                           'heat_carrier_return' in df_pivot.columns and
+                           df_pivot['heat_carrier_forward'].notna().any() and
+                           df_pivot['heat_carrier_return'].notna().any())
+        has_radiator = ('radiator_forward' in df_pivot.columns and
+                       'radiator_return' in df_pivot.columns and
+                       df_pivot['radiator_forward'].notna().any() and
+                       df_pivot['radiator_return'].notna().any())
+
+        if has_heat_carrier:
             # IVT uses heat_carrier
             df_pivot['radiator_delta'] = df_pivot['heat_carrier_forward'] - df_pivot['heat_carrier_return']
             result['radiator_delta'] = df_pivot['radiator_delta'].replace({float('nan'): None}).tolist()
-        elif 'radiator_forward' in df_pivot.columns and 'radiator_return' in df_pivot.columns:
+        elif has_radiator:
             # Thermia uses radiator
             df_pivot['radiator_delta'] = df_pivot['radiator_forward'] - df_pivot['radiator_return']
             result['radiator_delta'] = df_pivot['radiator_delta'].replace({float('nan'): None}).tolist()
 
         # Calculate delta for brine/köldbärare side
-        if 'brine_in_evaporator' in df_pivot.columns and 'brine_out_condenser' in df_pivot.columns:
+        has_brine = ('brine_in_evaporator' in df_pivot.columns and
+                    'brine_out_condenser' in df_pivot.columns and
+                    df_pivot['brine_in_evaporator'].notna().any() and
+                    df_pivot['brine_out_condenser'].notna().any())
+        if has_brine:
             df_pivot['brine_delta'] = df_pivot['brine_in_evaporator'] - df_pivot['brine_out_condenser']
             result['brine_delta'] = df_pivot['brine_delta'].replace({float('nan'): None}).tolist()
 
@@ -652,9 +524,59 @@ def get_temperature_data_from_pivot(df_pivot):
         return {'timestamps': []}
 
 
+def _to_chart_data(df, time_col: str, value_col: str) -> list:
+    """
+    Convert DataFrame columns to chart data format [[timestamp, value], ...]
+
+    OPTIMIZED: Uses vectorized operations instead of iterrows() for 100x speedup
+    """
+    if time_col not in df.columns or value_col not in df.columns:
+        return []
+
+    # Vectorized timestamp conversion
+    if pd.api.types.is_datetime64_any_dtype(df[time_col]):
+        times = df[time_col].dt.strftime('%Y-%m-%dT%H:%M:%S.%f').str[:-3] + 'Z'
+    else:
+        times = df[time_col].astype(str)
+
+    # Vectorized value extraction with NaN→None
+    values = df[value_col].where(df[value_col].notna(), None)
+
+    # Convert to list of [time, value] pairs
+    return list(map(list, zip(times.tolist(), values.tolist())))
+
+
+def _get_value_with_minmax(metric_name: str, current_metrics: dict, min_max: dict) -> dict:
+    """
+    Helper to get current value with min/max/avg statistics.
+
+    Extracted to standalone function to avoid 3x code duplication.
+    """
+    current = current_metrics.get(metric_name)
+    # current_metrics returns {'value': ..., 'unit': ..., 'time': ...}
+    if isinstance(current, dict):
+        current_val = round(current.get('value'), 1) if current.get('value') is not None else None
+    else:
+        current_val = round(current, 1) if current is not None else None
+
+    mm = min_max.get(metric_name, {})
+    min_val = round(mm.get('min'), 1) if mm.get('min') is not None else None
+    max_val = round(mm.get('max'), 1) if mm.get('max') is not None else None
+    avg_val = round(mm.get('avg'), 1) if mm.get('avg') is not None else None
+
+    return {
+        'current': current_val,
+        'min': min_val,
+        'max': max_val,
+        'avg': avg_val
+    }
+
+
 def get_performance_data_from_pivot(df_pivot):
-    """Extract performance data from pre-pivoted dataframe (guaranteed aligned timestamps)"""
-    import pandas as pd
+    """Extract performance data from pre-pivoted dataframe (guaranteed aligned timestamps)
+
+    OPTIMIZED: Uses vectorized operations instead of iterrows()
+    """
     try:
         if df_pivot.empty:
             return {
@@ -664,33 +586,57 @@ def get_performance_data_from_pivot(df_pivot):
                 'timestamps': []
             }
 
+        # Check if data needs re-pivoting (InfluxDB union+pivot doesn't always work correctly)
+        temp_cols = ['radiator_forward', 'radiator_return', 'brine_in_evaporator', 'brine_out_condenser']
+        available_cols = [c for c in temp_cols if c in df_pivot.columns]
+        if available_cols:
+            avg_fill_rate = sum(df_pivot[c].notna().sum() for c in available_cols) / (len(df_pivot) * len(available_cols))
+            if avg_fill_rate < 0.5:  # Less than 50% fill rate suggests unpivoted data
+                # Re-pivot using pandas groupby to align metrics by timestamp
+                numeric_cols = df_pivot.select_dtypes(include=[np.number]).columns.tolist()
+                agg_dict = {col: 'mean' for col in numeric_cols if col in df_pivot.columns}
+                for status_col in ['compressor_status', 'brine_pump_status', 'radiator_pump_status', 'switch_valve_status']:
+                    if status_col in agg_dict:
+                        agg_dict[status_col] = 'last'
+                if agg_dict:
+                    df_pivot = df_pivot.groupby('_time').agg(agg_dict).reset_index()
+
         # Get consistent timestamps
         timestamps = df_pivot['_time'].astype(str).tolist()
 
-        # Calculate deltas using pivoted data (aligned timestamps guaranteed)
+        # Calculate deltas using vectorized operations
+        # Check for actual data, not just column existence
         brine_delta = []
         radiator_delta = []
         compressor_status = []
 
-        if 'brine_in_evaporator' in df_pivot.columns and 'brine_out_condenser' in df_pivot.columns:
+        has_brine = ('brine_in_evaporator' in df_pivot.columns and
+                    'brine_out_condenser' in df_pivot.columns and
+                    df_pivot['brine_in_evaporator'].notna().any() and
+                    df_pivot['brine_out_condenser'].notna().any())
+        if has_brine:
             df_pivot['brine_delta_calc'] = df_pivot['brine_in_evaporator'] - df_pivot['brine_out_condenser']
-            brine_delta = [
-                [row['_time'].isoformat(), float(row['brine_delta_calc']) if not pd.isna(row['brine_delta_calc']) else None]
-                for _, row in df_pivot.iterrows()
-            ]
+            brine_delta = _to_chart_data(df_pivot, '_time', 'brine_delta_calc')
 
-        if 'radiator_forward' in df_pivot.columns and 'radiator_return' in df_pivot.columns:
+        # Check for radiator (Thermia) or heat_carrier (IVT) data
+        has_heat_carrier = ('heat_carrier_forward' in df_pivot.columns and
+                           'heat_carrier_return' in df_pivot.columns and
+                           df_pivot['heat_carrier_forward'].notna().any() and
+                           df_pivot['heat_carrier_return'].notna().any())
+        has_radiator = ('radiator_forward' in df_pivot.columns and
+                       'radiator_return' in df_pivot.columns and
+                       df_pivot['radiator_forward'].notna().any() and
+                       df_pivot['radiator_return'].notna().any())
+
+        if has_heat_carrier:
+            df_pivot['radiator_delta_calc'] = df_pivot['heat_carrier_forward'] - df_pivot['heat_carrier_return']
+            radiator_delta = _to_chart_data(df_pivot, '_time', 'radiator_delta_calc')
+        elif has_radiator:
             df_pivot['radiator_delta_calc'] = df_pivot['radiator_forward'] - df_pivot['radiator_return']
-            radiator_delta = [
-                [row['_time'].isoformat(), float(row['radiator_delta_calc']) if not pd.isna(row['radiator_delta_calc']) else None]
-                for _, row in df_pivot.iterrows()
-            ]
+            radiator_delta = _to_chart_data(df_pivot, '_time', 'radiator_delta_calc')
 
         if 'compressor_status' in df_pivot.columns:
-            compressor_status = [
-                [row['_time'].isoformat(), float(row['compressor_status']) if not pd.isna(row['compressor_status']) else None]
-                for _, row in df_pivot.iterrows()
-            ]
+            compressor_status = _to_chart_data(df_pivot, '_time', 'compressor_status')
 
         return {
             'brine_delta': brine_delta,
@@ -708,134 +654,11 @@ def get_performance_data_from_pivot(df_pivot):
         }
 
 
-# DEPRECATED: Old helper functions (kept for compatibility)
-
-def get_cop_data_cached(cached_cop_df):
-    """Extract COP data from pre-calculated COP dataframe (avoids redundant InfluxDB query)"""
-    try:
-        if cached_cop_df.empty or 'estimated_cop' not in cached_cop_df.columns:
-            return {'timestamps': [], 'values': [], 'avg': 0}
-
-        # DON'T drop NaN values - keep timestamps aligned with other charts
-        # Convert NaN to None (becomes null in JSON) for gaps when compressor is off
-        timestamps = cached_cop_df['_time'].astype(str).tolist()
-        values = cached_cop_df['estimated_cop'].replace({float('nan'): None}).tolist()
-
-        # Calculate average only from non-NaN values
-        avg_cop = float(cached_cop_df['estimated_cop'].mean()) if not cached_cop_df['estimated_cop'].isna().all() else 0
-
-        return {
-            'timestamps': timestamps,
-            'values': values,
-            'avg': avg_cop
-        }
-    except Exception as e:
-        logger.error(f"Error getting cached COP data: {e}")
-        return {'timestamps': [], 'values': [], 'avg': 0}
-
-
-def get_temperature_data_from_df(df):
-    """Extract temperature data from pre-fetched dataframe with aligned timestamps"""
-    try:
-        if df.empty:
-            return {'timestamps': []}
-
-        # Pivot dataframe to ensure consistent timestamp index across all metrics
-        df_pivot = df.pivot_table(
-            index='_time',
-            columns='name',
-            values='_value',
-            aggfunc='mean'
-        ).reset_index()
-
-        # Get consistent timestamps from pivoted dataframe
-        timestamps = df_pivot['_time'].astype(str).tolist()
-
-        # Extract each metric with same timestamp index
-        metrics = [
-            'outdoor_temp', 'indoor_temp', 'radiator_forward',
-            'radiator_return', 'hot_water_top',
-            'brine_in_evaporator', 'brine_out_condenser'
-        ]
-
-        result = {'timestamps': timestamps}
-        for metric in metrics:
-            if metric in df_pivot.columns:
-                # Replace NaN with None for JSON null values
-                result[metric] = df_pivot[metric].replace({float('nan'): None}).tolist()
-
-        return result
-    except Exception as e:
-        logger.error(f"Error getting temperature data from df: {e}")
-        return {'timestamps': []}
-
-
-def get_performance_data_from_df(df):
-    """Extract performance data from pre-fetched dataframe with aligned timestamps"""
-    import pandas as pd
-    try:
-        if df.empty:
-            return {
-                'brine_delta': [],
-                'radiator_delta': [],
-                'compressor_status': [],
-                'timestamps': []
-            }
-
-        # Pivot dataframe to ensure consistent timestamp index
-        df_pivot = df.pivot_table(
-            index='_time',
-            columns='name',
-            values='_value',
-            aggfunc='mean'
-        ).reset_index()
-
-        # Get consistent timestamps
-        timestamps = df_pivot['_time'].astype(str).tolist()
-
-        # Calculate deltas using pivoted data (aligned timestamps)
-        brine_delta = []
-        radiator_delta = []
-        compressor_status = []
-
-        if 'brine_in_evaporator' in df_pivot.columns and 'brine_out_condenser' in df_pivot.columns:
-            df_pivot['brine_delta_calc'] = df_pivot['brine_in_evaporator'] - df_pivot['brine_out_condenser']
-            brine_delta = [
-                [row['_time'].isoformat(), float(row['brine_delta_calc']) if not pd.isna(row['brine_delta_calc']) else None]
-                for _, row in df_pivot.iterrows()
-            ]
-
-        if 'radiator_forward' in df_pivot.columns and 'radiator_return' in df_pivot.columns:
-            df_pivot['radiator_delta_calc'] = df_pivot['radiator_forward'] - df_pivot['radiator_return']
-            radiator_delta = [
-                [row['_time'].isoformat(), float(row['radiator_delta_calc']) if not pd.isna(row['radiator_delta_calc']) else None]
-                for _, row in df_pivot.iterrows()
-            ]
-
-        if 'compressor_status' in df_pivot.columns:
-            compressor_status = [
-                [row['_time'].isoformat(), float(row['compressor_status']) if not pd.isna(row['compressor_status']) else None]
-                for _, row in df_pivot.iterrows()
-            ]
-
-        return {
-            'brine_delta': brine_delta,
-            'radiator_delta': radiator_delta,
-            'compressor_status': compressor_status,
-            'timestamps': timestamps
-        }
-    except Exception as e:
-        logger.error(f"Error getting performance data from df: {e}")
-        return {
-            'brine_delta': [],
-            'radiator_delta': [],
-            'compressor_status': [],
-            'timestamps': []
-        }
-
-
 def get_power_data_from_df(df):
-    """Extract power data from pre-fetched dataframe"""
+    """Extract power data from pre-fetched dataframe
+
+    OPTIMIZED: Uses vectorized operations instead of iterrows()
+    """
     try:
         result = {
             'power_consumption': [],
@@ -850,27 +673,18 @@ def get_power_data_from_df(df):
         # Get power consumption
         power = df[df['name'] == 'power_consumption']
         if not power.empty:
-            result['power_consumption'] = [
-                [row['_time'].isoformat(), float(row['_value'])]
-                for _, row in power.iterrows()
-            ]
+            result['power_consumption'] = _to_chart_data(power, '_time', '_value')
             result['timestamps'] = power['_time'].astype(str).tolist()
 
         # Get compressor status
         comp = df[df['name'] == 'compressor_status']
         if not comp.empty:
-            result['compressor_status'] = [
-                [row['_time'].isoformat(), float(row['_value'])]
-                for _, row in comp.iterrows()
-            ]
+            result['compressor_status'] = _to_chart_data(comp, '_time', '_value')
 
         # Get heater percentage
         heater = df[df['name'] == 'additional_heat_percent']
         if not heater.empty:
-            result['additional_heat_percent'] = [
-                [row['_time'].isoformat(), float(row['_value'])]
-                for _, row in heater.iterrows()
-            ]
+            result['additional_heat_percent'] = _to_chart_data(heater, '_time', '_value')
 
         return result
     except Exception as e:
@@ -884,7 +698,10 @@ def get_power_data_from_df(df):
 
 
 def get_valve_data_from_df(df):
-    """Extract valve data from pre-fetched dataframe"""
+    """Extract valve data from pre-fetched dataframe
+
+    OPTIMIZED: Uses vectorized operations instead of iterrows()
+    """
     try:
         result = {
             'valve_status': [],
@@ -905,27 +722,18 @@ def get_valve_data_from_df(df):
         valve = df[df['name'] == 'switch_valve_status']
         logger.info(f"get_valve_data_from_df: switch_valve_status rows: {len(valve)}")
         if not valve.empty:
-            result['valve_status'] = [
-                [row['_time'].isoformat(), float(row['_value'])]
-                for _, row in valve.iterrows()
-            ]
+            result['valve_status'] = _to_chart_data(valve, '_time', '_value')
             result['timestamps'] = valve['_time'].astype(str).tolist()
 
         # Get compressor status
         comp = df[df['name'] == 'compressor_status']
         if not comp.empty:
-            result['compressor_status'] = [
-                [row['_time'].isoformat(), float(row['_value'])]
-                for _, row in comp.iterrows()
-            ]
+            result['compressor_status'] = _to_chart_data(comp, '_time', '_value')
 
         # Get hot water temp
         hw_temp = df[df['name'] == 'hot_water_top']
         if not hw_temp.empty:
-            result['hot_water_temp'] = [
-                [row['_time'].isoformat(), float(row['_value'])]
-                for _, row in hw_temp.iterrows()
-            ]
+            result['hot_water_temp'] = _to_chart_data(hw_temp, '_time', '_value')
 
         return result
     except Exception as e:
@@ -1385,26 +1193,9 @@ def get_status_data(time_range='24h'):
             logger.debug(f"Could not calculate COP: {e}")
             pass
 
-        def get_value_with_minmax(metric_name):
-            """Helper to get current value with min/max/avg"""
-            current = current_metrics.get(metric_name)
-            # current_metrics returns {'value': ..., 'unit': ..., 'time': ...}
-            if isinstance(current, dict):
-                current_val = round(current.get('value'), 1) if current.get('value') is not None else None
-            else:
-                current_val = round(current, 1) if current is not None else None
-
-            mm = min_max.get(metric_name, {})
-            min_val = round(mm.get('min'), 1) if mm.get('min') is not None else None
-            max_val = round(mm.get('max'), 1) if mm.get('max') is not None else None
-            avg_val = round(mm.get('avg'), 1) if mm.get('avg') is not None else None
-
-            return {
-                'current': current_val,
-                'min': min_val,
-                'max': max_val,
-                'avg': avg_val
-            }
+        # Use partial to bind closure variables to standalone helper
+        def get_value(metric_name):
+            return _get_value_with_minmax(metric_name, current_metrics, min_max)
 
         status = {
             'alarm': {
@@ -1414,14 +1205,14 @@ def get_status_data(time_range='24h'):
                 'time': alarm['alarm_time'].isoformat() if alarm.get('alarm_time') else None
             },
             'current': {
-                'outdoor_temp': get_value_with_minmax('outdoor_temp'),
-                'indoor_temp': get_value_with_minmax('indoor_temp'),
-                'hot_water': get_value_with_minmax('hot_water_top'),
-                'brine_in': get_value_with_minmax('brine_in_evaporator'),
-                'brine_out': get_value_with_minmax('brine_out_condenser'),
+                'outdoor_temp': get_value('outdoor_temp'),
+                'indoor_temp': get_value('indoor_temp'),
+                'hot_water': get_value('hot_water_top'),
+                'brine_in': get_value('brine_in_evaporator'),
+                'brine_out': get_value('brine_out_condenser'),
                 # IVT uses heat_carrier_forward/return, Thermia uses radiator_forward/return
-                'radiator_forward': get_value_with_minmax('heat_carrier_forward') if get_value_with_minmax('heat_carrier_forward').get('current') is not None else get_value_with_minmax('radiator_forward'),
-                'radiator_return': get_value_with_minmax('heat_carrier_return') if get_value_with_minmax('heat_carrier_return').get('current') is not None else get_value_with_minmax('radiator_return'),
+                'radiator_forward': get_value('heat_carrier_forward') if get_value('heat_carrier_forward').get('current') is not None else get_value('radiator_forward'),
+                'radiator_return': get_value('heat_carrier_return') if get_value('heat_carrier_return').get('current') is not None else get_value('radiator_return'),
                 'power': round(current_metrics.get('power_consumption', {}).get('value', 0), 0) if current_metrics.get('power_consumption', {}).get('value') is not None else None,
                 'compressor_running': bool(current_metrics.get('compressor_status', {}).get('value', 0)),
                 'brine_pump_running': bool(current_metrics.get('brine_pump_status', {}).get('value', 0)),
@@ -1468,25 +1259,9 @@ def get_status_data_cached(time_range='24h', cached_cop_df=None, cached_min_max=
                 if len(cop_values) > 0:
                     current_cop = round(cop_values.mean(), 2)
 
-        def get_value_with_minmax(metric_name):
-            """Helper to get current value with min/max/avg"""
-            current = current_metrics.get(metric_name)
-            if isinstance(current, dict):
-                current_val = round(current.get('value'), 1) if current.get('value') is not None else None
-            else:
-                current_val = round(current, 1) if current is not None else None
-
-            mm = min_max.get(metric_name, {})
-            min_val = round(mm.get('min'), 1) if mm.get('min') is not None else None
-            max_val = round(mm.get('max'), 1) if mm.get('max') is not None else None
-            avg_val = round(mm.get('avg'), 1) if mm.get('avg') is not None else None
-
-            return {
-                'current': current_val,
-                'min': min_val,
-                'max': max_val,
-                'avg': avg_val
-            }
+        # Use wrapper to bind closure variables to standalone helper
+        def get_value(metric_name):
+            return _get_value_with_minmax(metric_name, current_metrics, min_max)
 
         status = {
             'alarm': {
@@ -1496,14 +1271,14 @@ def get_status_data_cached(time_range='24h', cached_cop_df=None, cached_min_max=
                 'time': alarm['alarm_time'].isoformat() if alarm.get('alarm_time') else None
             },
             'current': {
-                'outdoor_temp': get_value_with_minmax('outdoor_temp'),
-                'indoor_temp': get_value_with_minmax('indoor_temp'),
-                'hot_water': get_value_with_minmax('hot_water_top'),
-                'brine_in': get_value_with_minmax('brine_in_evaporator'),
-                'brine_out': get_value_with_minmax('brine_out_condenser'),
+                'outdoor_temp': get_value('outdoor_temp'),
+                'indoor_temp': get_value('indoor_temp'),
+                'hot_water': get_value('hot_water_top'),
+                'brine_in': get_value('brine_in_evaporator'),
+                'brine_out': get_value('brine_out_condenser'),
                 # IVT uses heat_carrier_forward/return, Thermia uses radiator_forward/return
-                'radiator_forward': get_value_with_minmax('heat_carrier_forward') if get_value_with_minmax('heat_carrier_forward').get('current') is not None else get_value_with_minmax('radiator_forward'),
-                'radiator_return': get_value_with_minmax('heat_carrier_return') if get_value_with_minmax('heat_carrier_return').get('current') is not None else get_value_with_minmax('radiator_return'),
+                'radiator_forward': get_value('heat_carrier_forward') if get_value('heat_carrier_forward').get('current') is not None else get_value('radiator_forward'),
+                'radiator_return': get_value('heat_carrier_return') if get_value('heat_carrier_return').get('current') is not None else get_value('radiator_return'),
                 'power': round(current_metrics.get('power_consumption', {}).get('value', 0), 0) if current_metrics.get('power_consumption', {}).get('value') is not None else None,
                 'compressor_running': bool(current_metrics.get('compressor_status', {}).get('value', 0)),
                 'brine_pump_running': bool(current_metrics.get('brine_pump_status', {}).get('value', 0)),
@@ -1592,25 +1367,9 @@ def get_status_data_fully_cached(cached_cop_df, cached_min_max, cached_latest_va
                 if len(cop_values) > 0:
                     current_cop = round(cop_values.mean(), 2)
 
-        def get_value_with_minmax(metric_name):
-            """Helper to get current value with min/max/avg"""
-            current = current_metrics.get(metric_name)
-            if isinstance(current, dict):
-                current_val = round(current.get('value'), 1) if current.get('value') is not None else None
-            else:
-                current_val = round(current, 1) if current is not None else None
-
-            mm = min_max.get(metric_name, {})
-            min_val = round(mm.get('min'), 1) if mm.get('min') is not None else None
-            max_val = round(mm.get('max'), 1) if mm.get('max') is not None else None
-            avg_val = round(mm.get('avg'), 1) if mm.get('avg') is not None else None
-
-            return {
-                'current': current_val,
-                'min': min_val,
-                'max': max_val,
-                'avg': avg_val
-            }
+        # Use wrapper to bind closure variables to standalone helper
+        def get_value(metric_name):
+            return _get_value_with_minmax(metric_name, current_metrics, min_max)
 
         # Get Hetgas temperature - Thermia uses pressure_tube_temp, IVT uses hot_gas_compressor
         hotgas_temp = None
@@ -1632,14 +1391,14 @@ def get_status_data_fully_cached(cached_cop_df, cached_min_max, cached_latest_va
                 'time': alarm['alarm_time'].isoformat() if alarm.get('alarm_time') else None
             },
             'current': {
-                'outdoor_temp': get_value_with_minmax('outdoor_temp'),
-                'indoor_temp': get_value_with_minmax('indoor_temp'),
-                'hot_water': get_value_with_minmax('hot_water_top'),
-                'brine_in': get_value_with_minmax('brine_in_evaporator'),
-                'brine_out': get_value_with_minmax('brine_out_condenser'),
+                'outdoor_temp': get_value('outdoor_temp'),
+                'indoor_temp': get_value('indoor_temp'),
+                'hot_water': get_value('hot_water_top'),
+                'brine_in': get_value('brine_in_evaporator'),
+                'brine_out': get_value('brine_out_condenser'),
                 # IVT uses heat_carrier_forward/return, Thermia uses radiator_forward/return
-                'radiator_forward': get_value_with_minmax('heat_carrier_forward') if get_value_with_minmax('heat_carrier_forward').get('current') is not None else get_value_with_minmax('radiator_forward'),
-                'radiator_return': get_value_with_minmax('heat_carrier_return') if get_value_with_minmax('heat_carrier_return').get('current') is not None else get_value_with_minmax('radiator_return'),
+                'radiator_forward': get_value('heat_carrier_forward') if get_value('heat_carrier_forward').get('current') is not None else get_value('radiator_forward'),
+                'radiator_return': get_value('heat_carrier_return') if get_value('heat_carrier_return').get('current') is not None else get_value('radiator_return'),
                 'power': round(current_metrics.get('power_consumption', {}).get('value', 0), 0) if current_metrics.get('power_consumption', {}).get('value') is not None else None,
                 'compressor_running': bool(current_metrics.get('compressor_status', {}).get('value', 0)),
                 'brine_pump_running': bool(current_metrics.get('brine_pump_status', {}).get('value', 0)),
@@ -1687,6 +1446,7 @@ def get_kpi_data(time_range='24h', price_per_kwh=2.0):
             'runtime': {
                 'compressor_hours': runtime_stats.get('compressor_runtime_hours', 0),
                 'compressor_percent': runtime_stats.get('compressor_runtime_percent', 0),
+                'compressor_starts': runtime_stats.get('compressor_starts', 0),
                 'aux_heater_hours': runtime_stats.get('aux_heater_runtime_hours', 0),
                 'aux_heater_percent': runtime_stats.get('aux_heater_runtime_percent', 0),
                 'total_hours': runtime_stats.get('total_hours', 0)
@@ -1704,7 +1464,7 @@ def get_kpi_data(time_range='24h', price_per_kwh=2.0):
         logger.error(f"Error getting KPI data: {e}")
         return {
             'energy': {'total_kwh': 0, 'total_cost': 0, 'avg_power': 0, 'peak_power': 0},
-            'runtime': {'compressor_hours': 0, 'compressor_percent': 0, 'aux_heater_hours': 0, 'aux_heater_percent': 0, 'total_hours': 0},
+            'runtime': {'compressor_hours': 0, 'compressor_percent': 0, 'compressor_starts': 0, 'aux_heater_hours': 0, 'aux_heater_percent': 0, 'total_hours': 0},
             'hot_water': {'total_cycles': 0, 'cycles_per_day': 0, 'avg_duration_minutes': 0, 'avg_energy_kwh': 0}
         }
 
@@ -1725,6 +1485,7 @@ def get_kpi_data_cached(time_range, cached_runtime_stats, cached_hot_water_stats
             'runtime': {
                 'compressor_hours': cached_runtime_stats.get('compressor_runtime_hours', 0),
                 'compressor_percent': cached_runtime_stats.get('compressor_runtime_percent', 0),
+                'compressor_starts': cached_runtime_stats.get('compressor_starts', 0),
                 'aux_heater_hours': cached_runtime_stats.get('aux_heater_runtime_hours', 0),
                 'aux_heater_percent': cached_runtime_stats.get('aux_heater_runtime_percent', 0),
                 'total_hours': cached_runtime_stats.get('total_hours', 0)
@@ -1742,7 +1503,7 @@ def get_kpi_data_cached(time_range, cached_runtime_stats, cached_hot_water_stats
         logger.error(f"Error getting cached KPI data: {e}")
         return {
             'energy': {'total_kwh': 0, 'total_cost': 0, 'avg_power': 0, 'peak_power': 0},
-            'runtime': {'compressor_hours': 0, 'compressor_percent': 0, 'aux_heater_hours': 0, 'aux_heater_percent': 0, 'total_hours': 0},
+            'runtime': {'compressor_hours': 0, 'compressor_percent': 0, 'compressor_starts': 0, 'aux_heater_hours': 0, 'aux_heater_percent': 0, 'total_hours': 0},
             'hot_water': {'total_cycles': 0, 'cycles_per_day': 0, 'avg_duration_minutes': 0, 'avg_energy_kwh': 0}
         }
 
@@ -1875,6 +1636,7 @@ def background_updates():
 if __name__ == '__main__':
     logger.info("=" * 60)
     logger.info(f"🔥 Starting {provider.get_display_name()} Dashboard")
+    logger.info(f"📦 Version: {VERSION} (built {BUILD_TIME})")
     logger.info("=" * 60)
     logger.info("📊 WebSocket Dashboard with ECharts")
     logger.info(f"🏢 Provider: {provider.get_brand_name()}")

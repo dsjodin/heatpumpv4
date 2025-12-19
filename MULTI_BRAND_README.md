@@ -469,7 +469,7 @@ Om du uppgraderar från tidigare version:
 
 1. **Registers flyttade**: Från `config.yaml` → `providers/<brand>/registers.py`
 2. **Larmkoder flyttade**: Från `data_query.py` → `providers/<brand>/alarms.py`
-3. **Config.yaml enklare**: Endast brand-val + MQTT/InfluxDB settings
+3. **Config.yaml enklare**: Endast brand-val + InfluxDB/H66 settings
 4. **Nya filer**: `providers/` katalog skapad
 5. **Bakåtkompatibel**: Thermia fortsätter fungera som tidigare
 
