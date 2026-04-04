@@ -164,6 +164,159 @@ def get_config():
     })
 
 
+# ==================== Settings API ====================
+
+def set_bucket_retention(days):
+    """Set InfluxDB bucket retention policy"""
+    try:
+        buckets_api = data_query.client.buckets_api()
+        bucket = buckets_api.find_bucket_by_name(data_query.bucket)
+        if bucket:
+            retention_seconds = days * 86400 if days > 0 else 0
+            bucket.retention_rules = [{"everySeconds": retention_seconds, "type": "expire"}]
+            buckets_api.update_bucket(bucket=bucket)
+            logger.info(f"✅ Bucket retention set to {days} days ({retention_seconds}s)")
+            return True
+    except Exception as e:
+        logger.error(f"❌ Failed to set retention: {e}")
+    return False
+
+
+def apply_retention_from_config():
+    """Apply retention policy from config at startup"""
+    config_path = '/app/config.yaml'
+    try:
+        with open(config_path, 'r') as f:
+            config = yaml.safe_load(f)
+        days = config.get('retention', {}).get('days', 90)
+        if days > 0:
+            set_bucket_retention(days)
+            logger.info(f"✅ Applied retention policy: {days} days")
+    except Exception as e:
+        logger.warning(f"⚠️ Could not apply retention policy: {e}")
+
+
+# Apply retention on startup
+apply_retention_from_config()
+
+
+@app.route('/api/settings')
+def get_settings():
+    """Get all editable settings + system info"""
+    config_path = '/app/config.yaml'
+    try:
+        with open(config_path, 'r') as f:
+            config = yaml.safe_load(f)
+    except Exception:
+        config = {}
+
+    # Get InfluxDB health
+    try:
+        health = data_query.client.health()
+        influx_status = {'status': str(health.status), 'version': str(health.version)}
+    except Exception:
+        influx_status = {'status': 'unavailable', 'version': 'unknown'}
+
+    # Get bucket retention
+    try:
+        buckets_api = data_query.client.buckets_api()
+        bucket = buckets_api.find_bucket_by_name(data_query.bucket)
+        if bucket and bucket.retention_rules:
+            retention_seconds = bucket.retention_rules[0].every_seconds
+            current_retention_days = retention_seconds // 86400 if retention_seconds > 0 else 0
+        else:
+            current_retention_days = 0
+    except Exception:
+        current_retention_days = 0
+
+    return jsonify({
+        'brand': config.get('brand', 'thermia'),
+        'cop_flow_factor': config.get('cop', {}).get('flow_factor', 2.7),
+        'hw_min_cycle_minutes': config.get('hot_water', {}).get('min_cycle_minutes', 2),
+        'collection_interval': config.get('collection', {}).get('interval_seconds', 30),
+        'dashboard_refresh_interval': config.get('dashboard', {}).get('refresh_interval', 30),
+        'electricity_price': config.get('electricity_price', 2.0),
+        'retention_days': config.get('retention', {}).get('days', 90),
+        'current_retention_days': current_retention_days,
+        'system': {
+            'influxdb': influx_status,
+            'dashboard_version': VERSION,
+            'build_time': BUILD_TIME,
+        }
+    })
+
+
+@app.route('/api/settings', methods=['POST'])
+def save_settings():
+    """Save settings to config.yaml and apply retention"""
+    config_path = '/app/config.yaml'
+    data = request.json
+
+    try:
+        with open(config_path, 'r') as f:
+            config = yaml.safe_load(f) or {}
+    except Exception:
+        config = {}
+
+    needs_restart = []
+
+    # Update values with validation
+    if 'brand' in data and data['brand'] in ('thermia', 'ivt', 'nibe'):
+        if data['brand'] != config.get('brand'):
+            needs_restart.append('brand')
+        config['brand'] = data['brand']
+
+    if 'cop_flow_factor' in data:
+        val = float(data['cop_flow_factor'])
+        if 1.0 <= val <= 5.0:
+            config.setdefault('cop', {})['flow_factor'] = round(val, 2)
+
+    if 'hw_min_cycle_minutes' in data:
+        val = int(data['hw_min_cycle_minutes'])
+        if 0 <= val <= 60:
+            config.setdefault('hot_water', {})['min_cycle_minutes'] = val
+
+    if 'collection_interval' in data:
+        val = int(data['collection_interval'])
+        if 5 <= val <= 300:
+            if val != config.get('collection', {}).get('interval_seconds'):
+                needs_restart.append('collector')
+            config.setdefault('collection', {})['interval_seconds'] = val
+
+    if 'dashboard_refresh_interval' in data:
+        val = int(data['dashboard_refresh_interval'])
+        if 5 <= val <= 300:
+            config.setdefault('dashboard', {})['refresh_interval'] = val
+
+    if 'electricity_price' in data:
+        val = float(data['electricity_price'])
+        if 0 <= val <= 100:
+            config['electricity_price'] = round(val, 2)
+
+    if 'retention_days' in data:
+        val = int(data['retention_days'])
+        if val == 0 or (7 <= val <= 365):
+            config.setdefault('retention', {})['days'] = val
+
+    # Write config
+    try:
+        with open(config_path, 'w') as f:
+            yaml.dump(config, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
+    except Exception as e:
+        return jsonify({'success': False, 'message': f'Kunde inte spara: {e}'}), 500
+
+    # Apply retention policy
+    if 'retention_days' in data:
+        retention_days = config.get('retention', {}).get('days', 90)
+        set_bucket_retention(retention_days)
+
+    return jsonify({
+        'success': True,
+        'needs_restart': needs_restart,
+        'message': 'Inställningar sparade'
+    })
+
+
 @app.route('/api/debug/all-metrics')
 def get_all_metrics_debug():
     """

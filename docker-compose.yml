@@ -65,7 +65,7 @@ services:
       - SECRET_KEY=${SECRET_KEY:-heatpump-dashboard-secret-key-change-in-production}
       - PYTHONUNBUFFERED=1
     volumes:
-      - ./config.yaml:/app/config.yaml:ro
+      - ./config.yaml:/app/config.yaml
     depends_on:
       - influxdb
     restart: unless-stopped

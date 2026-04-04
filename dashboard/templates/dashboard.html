@@ -40,6 +40,11 @@
                             <i class="fas fa-chart-line me-1"></i> Analys
                         </a>
                     </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="#" data-view="settings" id="tab-settings">
+                            <i class="fas fa-cog me-1"></i> Inställningar
+                        </a>
+                    </li>
                 </ul>
             </div>
             <div class="d-flex align-items-center gap-3">
@@ -501,6 +506,123 @@
                             </div>
                         </div>
                     </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Settings View -->
+    <div id="view-settings" class="view-content" style="display: none;">
+        <div class="container-fluid py-3">
+            <div class="row justify-content-center">
+                <div class="col-lg-8 col-xl-6">
+
+                    <!-- Save status alert (hidden by default) -->
+                    <div id="settings-alert" class="alert d-none" role="alert"></div>
+
+                    <!-- Värmepump -->
+                    <div class="card mb-3">
+                        <div class="card-header"><i class="fas fa-fire me-2"></i>Värmepump</div>
+                        <div class="card-body">
+                            <div class="mb-3">
+                                <label for="setting-brand" class="form-label">Märke</label>
+                                <select class="form-select" id="setting-brand">
+                                    <option value="thermia">Thermia</option>
+                                    <option value="ivt">IVT</option>
+                                    <option value="nibe">NIBE</option>
+                                </select>
+                                <div class="form-text"><span class="badge bg-warning text-dark">Omstart krävs</span> Ändring kräver omstart av alla tjänster</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Beräkningar -->
+                    <div class="card mb-3">
+                        <div class="card-header"><i class="fas fa-calculator me-2"></i>Beräkningar</div>
+                        <div class="card-body">
+                            <div class="mb-3">
+                                <label for="setting-flow-factor" class="form-label">COP flödesfaktor</label>
+                                <input type="number" class="form-control" id="setting-flow-factor" step="0.1" min="1.0" max="5.0">
+                                <div class="form-text">kW per °C temperaturskillnad. Beräkna: flöde (L/s) × 4.18. Exempel: 0.65 L/s → 2.72</div>
+                            </div>
+                            <div class="mb-3">
+                                <label for="setting-hw-min-cycle" class="form-label">Varmvatten min cykeltid (minuter)</label>
+                                <input type="number" class="form-control" id="setting-hw-min-cycle" step="1" min="0" max="60">
+                                <div class="form-text">Cykler kortare än detta filtreras bort (undviker sensorbrus)</div>
+                            </div>
+                            <div class="mb-3">
+                                <label for="setting-electricity-price" class="form-label">Elpris (kr/kWh)</label>
+                                <input type="number" class="form-control" id="setting-electricity-price" step="0.1" min="0" max="100">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Datainsamling -->
+                    <div class="card mb-3">
+                        <div class="card-header"><i class="fas fa-database me-2"></i>Datainsamling</div>
+                        <div class="card-body">
+                            <div class="mb-3">
+                                <label for="setting-collection-interval" class="form-label">Insamlingsintervall (sekunder)</label>
+                                <input type="number" class="form-control" id="setting-collection-interval" step="5" min="5" max="300">
+                                <div class="form-text"><span class="badge bg-warning text-dark">Omstart krävs</span> Ändring kräver omstart av collector-tjänsten</div>
+                            </div>
+                            <div class="mb-3">
+                                <label for="setting-refresh-interval" class="form-label">Dashboard uppdateringsintervall (sekunder)</label>
+                                <input type="number" class="form-control" id="setting-refresh-interval" step="5" min="5" max="300">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Datalagring -->
+                    <div class="card mb-3">
+                        <div class="card-header"><i class="fas fa-clock me-2"></i>Datalagring</div>
+                        <div class="card-body">
+                            <div class="mb-3">
+                                <label for="setting-retention-days" class="form-label">Behåll data (dagar)</label>
+                                <input type="number" class="form-control" id="setting-retention-days" min="7" max="365">
+                                <div class="form-text">Data äldre än detta raderas automatiskt av InfluxDB. Sätt 0 för obegränsad lagring.</div>
+                            </div>
+                            <div>
+                                <span class="text-muted small">Aktiv retention i InfluxDB: </span>
+                                <span class="badge bg-info" id="settings-current-retention">--</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Systeminformation -->
+                    <div class="card mb-3">
+                        <div class="card-header"><i class="fas fa-info-circle me-2"></i>Systeminformation</div>
+                        <div class="card-body">
+                            <table class="table table-sm table-borderless mb-0">
+                                <tbody>
+                                    <tr>
+                                        <td class="text-muted" style="width: 200px;">Dashboard version</td>
+                                        <td id="settings-dashboard-version">--</td>
+                                    </tr>
+                                    <tr>
+                                        <td class="text-muted">Byggtid</td>
+                                        <td id="settings-build-time">--</td>
+                                    </tr>
+                                    <tr>
+                                        <td class="text-muted">InfluxDB status</td>
+                                        <td><span class="badge" id="settings-influx-status">--</span></td>
+                                    </tr>
+                                    <tr>
+                                        <td class="text-muted">InfluxDB version</td>
+                                        <td id="settings-influx-version">--</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- Save button -->
+                    <div class="d-grid mb-4">
+                        <button class="btn btn-primary btn-lg" id="btn-save-settings" onclick="saveSettings()">
+                            <i class="fas fa-save me-2"></i>Spara inställningar
+                        </button>
+                    </div>
+
                 </div>
             </div>
         </div>
