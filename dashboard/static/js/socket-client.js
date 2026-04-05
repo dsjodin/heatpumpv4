@@ -142,6 +142,11 @@ function switchView(viewName) {
         setTimeout(() => window.resizeMainChart(), 100);
     }
 
+    // Load settings when switching to settings view
+    if (viewName === 'settings') {
+        loadSettings();
+    }
+
     console.log(`📱 Switched to ${viewName} view`);
 }
 
@@ -545,9 +550,157 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 });
 
+// ==================== Settings Functions ====================
+
+async function loadSettings() {
+    try {
+        const response = await fetch('/api/settings');
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const settings = await response.json();
+
+        // Populate form fields
+        document.getElementById('setting-brand').value = settings.brand || 'thermia';
+        document.getElementById('setting-flow-factor').value = settings.cop_flow_factor || 2.7;
+        document.getElementById('setting-hw-min-cycle').value = settings.hw_min_cycle_minutes || 2;
+        document.getElementById('setting-electricity-price').value = settings.electricity_price || 2.0;
+        document.getElementById('setting-collection-interval').value = settings.collection_interval || 30;
+        document.getElementById('setting-refresh-interval').value = settings.dashboard_refresh_interval || 30;
+        document.getElementById('setting-retention-days').value = settings.retention_days || 90;
+
+        // System info
+        const sys = settings.system || {};
+        document.getElementById('settings-dashboard-version').textContent = sys.dashboard_version || '--';
+        document.getElementById('settings-build-time').textContent = sys.build_time || '--';
+
+        const influx = sys.influxdb || {};
+        const statusEl = document.getElementById('settings-influx-status');
+        statusEl.textContent = influx.status || '--';
+        statusEl.className = 'badge ' + (influx.status === 'pass' ? 'bg-success' : 'bg-danger');
+
+        document.getElementById('settings-influx-version').textContent = influx.version || '--';
+
+        // Current retention
+        const retEl = document.getElementById('settings-current-retention');
+        retEl.textContent = settings.current_retention_days > 0
+            ? `${settings.current_retention_days} dagar`
+            : 'Obegränsad';
+
+        console.log('Settings loaded');
+    } catch (error) {
+        console.error('Failed to load settings:', error);
+    }
+}
+
+async function saveSettings() {
+    const btn = document.getElementById('btn-save-settings');
+    const alertEl = document.getElementById('settings-alert');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Sparar...';
+
+    try {
+        const payload = {
+            brand: document.getElementById('setting-brand').value,
+            cop_flow_factor: parseFloat(document.getElementById('setting-flow-factor').value),
+            hw_min_cycle_minutes: parseInt(document.getElementById('setting-hw-min-cycle').value),
+            electricity_price: parseFloat(document.getElementById('setting-electricity-price').value),
+            collection_interval: parseInt(document.getElementById('setting-collection-interval').value),
+            dashboard_refresh_interval: parseInt(document.getElementById('setting-refresh-interval').value),
+            retention_days: parseInt(document.getElementById('setting-retention-days').value)
+        };
+
+        const response = await fetch('/api/settings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            let msg = '<i class="fas fa-check me-2"></i>Inställningar sparade!';
+
+            if (result.needs_restart && result.needs_restart.length > 0) {
+                const services = result.needs_restart.join(', ');
+                msg += `<br><br>Ändringar kräver omstart av: <strong>${services}</strong>`;
+                msg += `<br><button class="btn btn-warning btn-sm mt-2" onclick="restartServices(${JSON.stringify(result.needs_restart)})">`;
+                msg += '<i class="fas fa-sync-alt me-1"></i>Starta om nu</button>';
+            }
+
+            alertEl.className = 'alert alert-success';
+            alertEl.innerHTML = msg;
+            alertEl.classList.remove('d-none');
+
+            // Reload settings to reflect actual state
+            await loadSettings();
+        } else {
+            alertEl.className = 'alert alert-danger';
+            alertEl.innerHTML = '<i class="fas fa-exclamation-triangle me-2"></i>' + (result.message || 'Kunde inte spara');
+            alertEl.classList.remove('d-none');
+        }
+    } catch (error) {
+        alertEl.className = 'alert alert-danger';
+        alertEl.innerHTML = '<i class="fas fa-exclamation-triangle me-2"></i>Fel: ' + error.message;
+        alertEl.classList.remove('d-none');
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fas fa-save me-2"></i>Spara inställningar';
+
+        // Auto-hide alert after 5 seconds
+        setTimeout(() => {
+            alertEl.classList.add('d-none');
+        }, 5000);
+    }
+}
+
+async function restartService(service) {
+    const statusDiv = document.getElementById('restart-status');
+    const statusAlert = document.getElementById('restart-status-alert');
+    const btn = document.getElementById(`btn-restart-${service}`);
+
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>Startar om...';
+
+    statusDiv.classList.remove('d-none');
+    statusAlert.className = 'alert alert-info mb-0 py-2';
+    statusAlert.innerHTML = `<i class="fas fa-spinner fa-spin me-2"></i>Startar om ${service}...`;
+
+    try {
+        const response = await fetch('/api/restart-service', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ service })
+        });
+        const result = await response.json();
+
+        if (result.success) {
+            statusAlert.className = 'alert alert-success mb-0 py-2';
+            statusAlert.innerHTML = `<i class="fas fa-check me-2"></i>${result.message}`;
+        } else {
+            statusAlert.className = 'alert alert-danger mb-0 py-2';
+            statusAlert.innerHTML = `<i class="fas fa-exclamation-triangle me-2"></i>${result.message}`;
+        }
+    } catch (error) {
+        statusAlert.className = 'alert alert-danger mb-0 py-2';
+        statusAlert.innerHTML = `<i class="fas fa-exclamation-triangle me-2"></i>Fel: ${error.message}`;
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fas fa-sync-alt me-1"></i>Starta om';
+        setTimeout(() => statusDiv.classList.add('d-none'), 5000);
+    }
+}
+
+async function restartServices(services) {
+    for (const service of services) {
+        await restartService(service);
+    }
+}
+
 // Export for global access
 window.dashboardSocket = socket;
 window.switchView = switchView;
+window.saveSettings = saveSettings;
+window.restartService = restartService;
+window.restartServices = restartServices;
 window.latestData = () => latestData;
 
-console.log('🚀 Socket client initialized (two-view design)');
+console.log('🚀 Socket client initialized (three-view design)');

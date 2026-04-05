@@ -41,7 +41,7 @@ services:
       - COLLECTION_INTERVAL=${COLLECTION_INTERVAL:-30}
       - HEATPUMP_BRAND=${HEATPUMP_BRAND:-thermia}
       # InfluxDB Configuration
-      - INFLUXDB_URL=http://influxdb:8087
+      - INFLUXDB_URL=http://influxdb:8086
       - INFLUXDB_TOKEN=${INFLUXDB_TOKEN}
       - INFLUXDB_ORG=${INFLUXDB_ORG:-thermia}
       - INFLUXDB_BUCKET=${INFLUXDB_BUCKET:-heatpump}
@@ -55,9 +55,9 @@ services:
       dockerfile: dashboard/Dockerfile
     container_name: heatpump-dashboard-websocket
     ports:
-      - "8051:8051"
+      - "8050:8050"
     environment:
-      - INFLUXDB_URL=http://influxdb:8087
+      - INFLUXDB_URL=http://influxdb:8086
       - INFLUXDB_TOKEN=${INFLUXDB_TOKEN}
       - INFLUXDB_ORG=${INFLUXDB_ORG:-thermia}
       - INFLUXDB_BUCKET=${INFLUXDB_BUCKET:-heatpump}
@@ -65,7 +65,8 @@ services:
       - SECRET_KEY=${SECRET_KEY:-heatpump-dashboard-secret-key-change-in-production}
       - PYTHONUNBUFFERED=1
     volumes:
-      - ./config.yaml:/app/config.yaml:ro
+      - ./config.yaml:/app/config.yaml
+      - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
       - influxdb
     restart: unless-stopped
