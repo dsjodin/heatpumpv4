@@ -11,6 +11,7 @@ import time
 import logging
 import yaml
 import math
+import docker
 import pandas as pd
 import numpy as np
 from datetime import datetime
@@ -327,6 +328,50 @@ def save_settings():
         'needs_restart': needs_restart,
         'message': 'Inställningar sparade'
     })
+
+
+# Allowed container names for restart (safety whitelist)
+RESTARTABLE_CONTAINERS = {
+    'collector': 'heatpump-collector',
+    'dashboard': 'heatpump-dashboard-websocket',
+}
+
+
+@app.route('/api/restart-service', methods=['POST'])
+def restart_service():
+    """Restart a Docker container by service name"""
+    data = request.json or {}
+    service = data.get('service', '')
+
+    if service not in RESTARTABLE_CONTAINERS:
+        return jsonify({
+            'success': False,
+            'message': f'Okänd tjänst: {service}'
+        }), 400
+
+    container_name = RESTARTABLE_CONTAINERS[service]
+
+    try:
+        docker_client = docker.from_env()
+        container = docker_client.containers.get(container_name)
+        container.restart(timeout=10)
+        logger.info(f"✅ Restarted container: {container_name}")
+        return jsonify({
+            'success': True,
+            'message': f'{service} har startats om'
+        })
+    except docker.errors.NotFound:
+        logger.error(f"❌ Container not found: {container_name}")
+        return jsonify({
+            'success': False,
+            'message': f'Container {container_name} hittades inte'
+        }), 404
+    except Exception as e:
+        logger.error(f"❌ Failed to restart {container_name}: {e}")
+        return jsonify({
+            'success': False,
+            'message': f'Kunde inte starta om: {e}'
+        }), 500
 
 
 @app.route('/api/debug/all-metrics')

@@ -618,9 +618,14 @@ async function saveSettings() {
 
         if (result.success) {
             let msg = '<i class="fas fa-check me-2"></i>Inställningar sparade!';
+
             if (result.needs_restart && result.needs_restart.length > 0) {
-                msg += '<br><strong>OBS:</strong> Omstart krävs för: ' + result.needs_restart.join(', ');
+                const services = result.needs_restart.join(', ');
+                msg += `<br><br>Ändringar kräver omstart av: <strong>${services}</strong>`;
+                msg += `<br><button class="btn btn-warning btn-sm mt-2" onclick="restartServices(${JSON.stringify(result.needs_restart)})">`;
+                msg += '<i class="fas fa-sync-alt me-1"></i>Starta om nu</button>';
             }
+
             alertEl.className = 'alert alert-success';
             alertEl.innerHTML = msg;
             alertEl.classList.remove('d-none');
@@ -647,10 +652,44 @@ async function saveSettings() {
     }
 }
 
+async function restartServices(services) {
+    const alertEl = document.getElementById('settings-alert');
+
+    for (const service of services) {
+        alertEl.className = 'alert alert-info';
+        alertEl.innerHTML = `<i class="fas fa-spinner fa-spin me-2"></i>Startar om ${service}...`;
+        alertEl.classList.remove('d-none');
+
+        try {
+            const response = await fetch('/api/restart-service', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ service })
+            });
+            const result = await response.json();
+
+            if (!result.success) {
+                alertEl.className = 'alert alert-danger';
+                alertEl.innerHTML = `<i class="fas fa-exclamation-triangle me-2"></i>${result.message}`;
+                return;
+            }
+        } catch (error) {
+            alertEl.className = 'alert alert-danger';
+            alertEl.innerHTML = `<i class="fas fa-exclamation-triangle me-2"></i>Fel vid omstart: ${error.message}`;
+            return;
+        }
+    }
+
+    alertEl.className = 'alert alert-success';
+    alertEl.innerHTML = '<i class="fas fa-check me-2"></i>Tjänster omstartade!';
+    setTimeout(() => alertEl.classList.add('d-none'), 5000);
+}
+
 // Export for global access
 window.dashboardSocket = socket;
 window.switchView = switchView;
 window.saveSettings = saveSettings;
+window.restartServices = restartServices;
 window.latestData = () => latestData;
 
 console.log('🚀 Socket client initialized (three-view design)');
