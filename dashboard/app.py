@@ -11,7 +11,6 @@ import time
 import logging
 import yaml
 import math
-import docker
 import pandas as pd
 import numpy as np
 from datetime import datetime
@@ -352,6 +351,7 @@ def restart_service():
     container_name = RESTARTABLE_CONTAINERS[service]
 
     try:
+        import docker
         docker_client = docker.from_env()
         container = docker_client.containers.get(container_name)
         container.restart(timeout=10)
@@ -360,12 +360,12 @@ def restart_service():
             'success': True,
             'message': f'{service} har startats om'
         })
-    except docker.errors.NotFound:
-        logger.error(f"❌ Container not found: {container_name}")
+    except ImportError:
+        logger.error("❌ docker library not installed")
         return jsonify({
             'success': False,
-            'message': f'Container {container_name} hittades inte'
-        }), 404
+            'message': 'Docker-biblioteket är inte installerat'
+        }), 500
     except Exception as e:
         logger.error(f"❌ Failed to restart {container_name}: {e}")
         return jsonify({
