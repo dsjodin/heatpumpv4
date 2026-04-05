@@ -19,6 +19,7 @@ from datetime import datetime
 VERSION = '1.2.0'
 BUILD_TIME = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
+from influxdb_client.domain.bucket_retention_rules import BucketRetentionRules
 from flask import Flask, render_template, jsonify, request
 from flask_socketio import SocketIO, emit
 from flask_cors import CORS
@@ -173,7 +174,7 @@ def set_bucket_retention(days):
         bucket = buckets_api.find_bucket_by_name(data_query.bucket)
         if bucket:
             retention_seconds = days * 86400 if days > 0 else 0
-            bucket.retention_rules = [{"everySeconds": retention_seconds, "type": "expire"}]
+            bucket.retention_rules = [BucketRetentionRules(type="expire", every_seconds=retention_seconds)]
             buckets_api.update_bucket(bucket=bucket)
             logger.info(f"✅ Bucket retention set to {days} days ({retention_seconds}s)")
             return True
@@ -212,9 +213,19 @@ def get_settings():
 
     # Get InfluxDB health
     try:
-        health = data_query.client.health()
-        influx_status = {'status': str(health.status), 'version': str(health.version)}
-    except Exception:
+        is_ready = data_query.client.ping()
+        if is_ready:
+            influx_status = {'status': 'pass'}
+        else:
+            influx_status = {'status': 'fail'}
+        # Try to get version from health endpoint
+        try:
+            health = data_query.client.health()
+            influx_status['version'] = str(health.version) if health.version else 'unknown'
+        except Exception:
+            influx_status['version'] = 'unknown'
+    except Exception as e:
+        logger.error(f"InfluxDB health check failed: {e}")
         influx_status = {'status': 'unavailable', 'version': 'unknown'}
 
     # Get bucket retention
@@ -226,7 +237,8 @@ def get_settings():
             current_retention_days = retention_seconds // 86400 if retention_seconds > 0 else 0
         else:
             current_retention_days = 0
-    except Exception:
+    except Exception as e:
+        logger.error(f"Failed to read bucket retention: {e}")
         current_retention_days = 0
 
     return jsonify({
