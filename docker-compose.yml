@@ -55,7 +55,7 @@ services:
       dockerfile: dashboard/Dockerfile
     container_name: heatpump-dashboard-websocket
     ports:
-      - "8051:8051"
+      - "8050:8050"
     environment:
       - INFLUXDB_URL=http://influxdb:8086
       - INFLUXDB_TOKEN=${INFLUXDB_TOKEN}
