@@ -8,6 +8,7 @@ let mainChart = null;
 let currentChartType = 'temperature';
 let chartData = null;
 let savedZoomState = null;  // Preserve zoom between updates
+let resizeHandler = null;   // Track resize listener for cleanup
 
 // Chart colors
 const COLORS = {
@@ -58,12 +59,20 @@ function initMainChart() {
     const container = document.getElementById('main-chart');
     if (!container) return;
 
+    // Clean up previous instance to prevent memory leaks
+    if (mainChart) {
+        mainChart.off('datazoom');
+        mainChart.dispose();
+    }
+    if (resizeHandler) {
+        window.removeEventListener('resize', resizeHandler);
+    }
+
     mainChart = echarts.init(container);
 
-    // Handle resize
-    window.addEventListener('resize', () => {
-        if (mainChart) mainChart.resize();
-    });
+    // Handle resize (named function for proper cleanup)
+    resizeHandler = () => { if (mainChart) mainChart.resize(); };
+    window.addEventListener('resize', resizeHandler);
 
     // Save zoom state when user zooms
     mainChart.on('datazoom', (params) => {
