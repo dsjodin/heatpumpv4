@@ -334,60 +334,42 @@ class HeatPumpDataQuery:
     def get_min_max_values(self, time_range: str = '24h') -> Dict[str, Dict[str, float]]:
         """Get MIN, MAX and MEAN values for all metrics over the specified time range
 
-        OPTIMIZED: Uses vectorized dict conversion instead of iterrows()
+        OPTIMIZED: Single query with union instead of 3 separate DB queries
         """
         try:
-            query_min = f'''
-                from(bucket: "{self.bucket}")
+            query = f'''
+                data = from(bucket: "{self.bucket}")
                     |> range(start: -{time_range})
                     |> filter(fn: (r) => r._measurement == "heatpump")
                     |> group(columns: ["name"])
-                    |> min()
+
+                min_data = data |> min() |> map(fn: (r) => ({{r with _stat: "min"}}))
+                max_data = data |> max() |> map(fn: (r) => ({{r with _stat: "max"}}))
+                mean_data = data |> mean() |> map(fn: (r) => ({{r with _stat: "mean"}}))
+
+                union(tables: [min_data, max_data, mean_data])
+                    |> group(columns: ["name", "_stat"])
             '''
 
-            query_max = f'''
-                from(bucket: "{self.bucket}")
-                    |> range(start: -{time_range})
-                    |> filter(fn: (r) => r._measurement == "heatpump")
-                    |> group(columns: ["name"])
-                    |> max()
-            '''
+            result = self.query_api.query_data_frame(query)
 
-            query_mean = f'''
-                from(bucket: "{self.bucket}")
-                    |> range(start: -{time_range})
-                    |> filter(fn: (r) => r._measurement == "heatpump")
-                    |> group(columns: ["name"])
-                    |> mean()
-            '''
+            if isinstance(result, list):
+                result = pd.concat(result, ignore_index=True)
 
-            result_min = self.query_api.query_data_frame(query_min)
-            result_max = self.query_api.query_data_frame(query_max)
-            result_mean = self.query_api.query_data_frame(query_mean)
+            if result.empty:
+                return {}
 
-            if isinstance(result_min, list):
-                result_min = pd.concat(result_min, ignore_index=True)
-            if isinstance(result_max, list):
-                result_max = pd.concat(result_max, ignore_index=True)
-            if isinstance(result_mean, list):
-                result_mean = pd.concat(result_mean, ignore_index=True)
-
-            # Vectorized: convert to dicts using set_index
-            min_dict = result_min.set_index('name')['_value'].to_dict() if not result_min.empty else {}
-            max_dict = result_max.set_index('name')['_value'].to_dict() if not result_max.empty else {}
-            avg_dict = result_mean.set_index('name')['_value'].to_dict() if not result_mean.empty else {}
-
-            # Combine into single dict
-            all_metrics = set(min_dict.keys()) | set(max_dict.keys()) | set(avg_dict.keys())
+            # Build min/max/avg dict from combined result
             min_max = {}
-            for metric_name in all_metrics:
-                min_max[metric_name] = {}
-                if metric_name in min_dict:
-                    min_max[metric_name]['min'] = min_dict[metric_name]
-                if metric_name in max_dict:
-                    min_max[metric_name]['max'] = max_dict[metric_name]
-                if metric_name in avg_dict:
-                    min_max[metric_name]['avg'] = avg_dict[metric_name]
+            for _, row in result.iterrows():
+                metric_name = row.get('name')
+                stat = row.get('_stat')
+                value = row.get('_value')
+                if metric_name and stat and value is not None:
+                    if metric_name not in min_max:
+                        min_max[metric_name] = {}
+                    stat_key = 'avg' if stat == 'mean' else stat
+                    min_max[metric_name][stat_key] = value
 
             return min_max
 
@@ -674,6 +656,15 @@ class HeatPumpDataQuery:
             df[forward_col] = pd.to_numeric(df[forward_col], errors='coerce')
             df[return_col] = pd.to_numeric(df[return_col], errors='coerce')
 
+            # Filter sentinel values (common: -48°C, -127°C, 0xFFFF/6553.5°C)
+            sentinel_mask = (
+                (df[forward_col] < -40) | (df[forward_col] > 100) |
+                (df[return_col] < -40) | (df[return_col] > 100)
+            )
+            if sentinel_mask.any():
+                logger.warning(f"calculate_cop_from_pivot: Filtered {sentinel_mask.sum()} rows with invalid temp values")
+                df.loc[sentinel_mask, [forward_col, return_col]] = np.nan
+
             df['radiator_delta'] = df[forward_col] - df[return_col]
 
             # Also copy the forward/return values with standard names for groupby later
@@ -691,7 +682,7 @@ class HeatPumpDataQuery:
             # Sort by time and calculate time differences
             df = df.sort_values('_time').reset_index(drop=True)
             df['time_diff_hours'] = df['_time'].diff().dt.total_seconds() / 3600
-            df['time_diff_hours'] = df['time_diff_hours'].fillna(0).clip(0, 1)  # Cap at 1 hour max
+            df['time_diff_hours'] = df['time_diff_hours'].fillna(0).clip(0, 0.5)  # Cap at 30 min max
 
             # Valid mask: compressor running and valid data
             if has_compressor:
@@ -750,7 +741,11 @@ class HeatPumpDataQuery:
                 raw_cop_max = interval_df.loc[valid_intervals, 'estimated_cop'].max()
                 logger.info(f"calculate_cop_from_pivot: COP - mean: {raw_cop_mean:.2f}, max: {raw_cop_max:.2f}")
 
-            # No clamping - show real calculated values for proper flow_factor calibration
+            # No hard clamping - but filter extreme outliers that indicate sensor malfunction
+            extreme_cop = interval_df['estimated_cop'].notna() & (interval_df['estimated_cop'] > 15)
+            if extreme_cop.any():
+                logger.warning(f"COP outliers detected: {extreme_cop.sum()} intervals with COP > 15 (likely sensor error, filtered)")
+                interval_df.loc[extreme_cop, 'estimated_cop'] = None
 
             # Calculate cumulative/seasonal COP
             interval_df['cumulative_heat'] = interval_df['heat_kwh'].cumsum()
@@ -905,9 +900,10 @@ class HeatPumpDataQuery:
             df = df.sort_values('_time')
             
             # Calculate time differences in hours - ANVÄNDER VERKLIG TID
+            # Cap at 30 min (0.5h) to avoid inflated energy from data gaps
             df['time_diff_hours'] = df['_time'].diff().dt.total_seconds() / 3600
-            df['time_diff_hours'] = df['time_diff_hours'].fillna(0)
-            
+            df['time_diff_hours'] = df['time_diff_hours'].fillna(0).clip(0, 0.5)
+
             # Energy = Power (W) * Time (h) / 1000 (to get kWh)
             df['energy_kwh'] = (df['_value'] * df['time_diff_hours']) / 1000
             
@@ -983,20 +979,28 @@ class HeatPumpDataQuery:
                         comp_runtime_seconds += time_diff
                 
                 # För sista datapunkten, anta samma intervall som föregående
+                # Cap at 120s to avoid overestimation from data gaps
                 if len(comp_df) > 1 and comp_df.iloc[-1]['_value'] > 0:
                     avg_interval = (comp_df.iloc[-1]['_time'] - comp_df.iloc[-2]['_time']).total_seconds()
+                    avg_interval = min(avg_interval, 120)
                     comp_runtime_seconds += avg_interval
             
             comp_runtime_hours = comp_runtime_seconds / 3600
             comp_runtime_percent = (comp_runtime_hours / total_hours * 100) if total_hours > 0 else 0
 
             # Count compressor starts (rising edges: 0→1 transitions)
+            # Debounce: require at least 60s between starts to filter sensor noise
             compressor_starts = 0
+            last_start_time = None
             if len(comp_df) > 1:
                 values = comp_df['_value'].values
+                times = comp_df['_time'].values
                 for i in range(1, len(values)):
                     if values[i] > 0 and values[i-1] <= 0:
-                        compressor_starts += 1
+                        current_time = pd.Timestamp(times[i])
+                        if last_start_time is None or (current_time - last_start_time).total_seconds() > 60:
+                            compressor_starts += 1
+                            last_start_time = current_time
             
             # Auxiliary heater runtime - ANVÄNDER VERKLIG TID
             aux_df = df[df['name'] == 'additional_heat_percent'].copy()
@@ -1013,8 +1017,10 @@ class HeatPumpDataQuery:
                         aux_runtime_seconds += time_diff
                 
                 # För sista datapunkten, anta samma intervall som föregående
+                # Cap at 120s to avoid overestimation from data gaps
                 if len(aux_df) > 1 and aux_df.iloc[-1]['_value'] > 0:
                     avg_interval = (aux_df.iloc[-1]['_time'] - aux_df.iloc[-2]['_time']).total_seconds()
+                    avg_interval = min(avg_interval, 120)
                     aux_runtime_seconds += avg_interval
             
             aux_runtime_hours = aux_runtime_seconds / 3600
