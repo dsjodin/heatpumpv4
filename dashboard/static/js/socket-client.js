@@ -652,43 +652,54 @@ async function saveSettings() {
     }
 }
 
-async function restartServices(services) {
-    const alertEl = document.getElementById('settings-alert');
+async function restartService(service) {
+    const statusDiv = document.getElementById('restart-status');
+    const statusAlert = document.getElementById('restart-status-alert');
+    const btn = document.getElementById(`btn-restart-${service}`);
 
-    for (const service of services) {
-        alertEl.className = 'alert alert-info';
-        alertEl.innerHTML = `<i class="fas fa-spinner fa-spin me-2"></i>Startar om ${service}...`;
-        alertEl.classList.remove('d-none');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>Startar om...';
 
-        try {
-            const response = await fetch('/api/restart-service', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ service })
-            });
-            const result = await response.json();
+    statusDiv.classList.remove('d-none');
+    statusAlert.className = 'alert alert-info mb-0 py-2';
+    statusAlert.innerHTML = `<i class="fas fa-spinner fa-spin me-2"></i>Startar om ${service}...`;
 
-            if (!result.success) {
-                alertEl.className = 'alert alert-danger';
-                alertEl.innerHTML = `<i class="fas fa-exclamation-triangle me-2"></i>${result.message}`;
-                return;
-            }
-        } catch (error) {
-            alertEl.className = 'alert alert-danger';
-            alertEl.innerHTML = `<i class="fas fa-exclamation-triangle me-2"></i>Fel vid omstart: ${error.message}`;
-            return;
+    try {
+        const response = await fetch('/api/restart-service', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ service })
+        });
+        const result = await response.json();
+
+        if (result.success) {
+            statusAlert.className = 'alert alert-success mb-0 py-2';
+            statusAlert.innerHTML = `<i class="fas fa-check me-2"></i>${result.message}`;
+        } else {
+            statusAlert.className = 'alert alert-danger mb-0 py-2';
+            statusAlert.innerHTML = `<i class="fas fa-exclamation-triangle me-2"></i>${result.message}`;
         }
+    } catch (error) {
+        statusAlert.className = 'alert alert-danger mb-0 py-2';
+        statusAlert.innerHTML = `<i class="fas fa-exclamation-triangle me-2"></i>Fel: ${error.message}`;
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fas fa-sync-alt me-1"></i>Starta om';
+        setTimeout(() => statusDiv.classList.add('d-none'), 5000);
     }
+}
 
-    alertEl.className = 'alert alert-success';
-    alertEl.innerHTML = '<i class="fas fa-check me-2"></i>Tjänster omstartade!';
-    setTimeout(() => alertEl.classList.add('d-none'), 5000);
+async function restartServices(services) {
+    for (const service of services) {
+        await restartService(service);
+    }
 }
 
 // Export for global access
 window.dashboardSocket = socket;
 window.switchView = switchView;
 window.saveSettings = saveSettings;
+window.restartService = restartService;
 window.restartServices = restartServices;
 window.latestData = () => latestData;
 
