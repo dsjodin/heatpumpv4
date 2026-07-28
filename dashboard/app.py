@@ -9,6 +9,7 @@ import os
 import sys
 import time
 import logging
+import secrets
 import yaml
 import math
 import pandas as pd
@@ -29,7 +30,7 @@ import eventlet
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from providers import get_provider
-from data_query import HeatPumpDataQuery
+from data_query import HeatPumpDataQuery, validate_time_range
 from config_colors import THERMIA_COLORS
 
 # Setup logging
@@ -39,15 +40,85 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+
+def _read_bool_env(name: str, default: bool = False) -> bool:
+    """Read a boolean from the environment ('1', 'true', 'yes' → True)"""
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in ('1', 'true', 'yes', 'on')
+
+
+def _resolve_secret_key() -> str:
+    """
+    Resolve the Flask secret key.
+
+    Never falls back to a published constant: an unset (or known-weak) key
+    yields a fresh random one for this process, which invalidates sessions on
+    restart but cannot be forged by anyone who has read this repository.
+    """
+    # Values published in this repository (app.py's old fallback and
+    # docker-compose.yml's default) plus the usual placeholders.
+    weak_keys = {
+        'heatpump-dashboard-secret-key',
+        'heatpump-dashboard-secret-key-change-in-production',
+        'changeme',
+        'change-me',
+        'secret',
+    }
+    key = os.getenv('SECRET_KEY', '').strip()
+
+    if not key:
+        logger.warning(
+            "⚠️  SECRET_KEY is not set — generating a random key for this process. "
+            "Set SECRET_KEY in the environment to keep sessions valid across restarts."
+        )
+        return secrets.token_hex(32)
+
+    if key in weak_keys:
+        logger.warning(
+            "⚠️  SECRET_KEY is set to a well-known default value and is being ignored. "
+            "Generating a random key for this process — set a unique SECRET_KEY."
+        )
+        return secrets.token_hex(32)
+
+    return key
+
+
+def _resolve_cors_origins() -> list:
+    """
+    Resolve the CORS allowlist from CORS_ALLOWED_ORIGINS (comma-separated).
+
+    Empty by default: the dashboard is served from the same origin as its own
+    pages, so it needs no cross-origin access at all. Previously `CORS(app)`
+    allowed *every* origin against every route, including the state-changing
+    POST /api/settings and POST /api/restart-service — which let any page the
+    user happened to visit drive this dashboard from their browser.
+    """
+    raw = os.getenv('CORS_ALLOWED_ORIGINS', '')
+    return [origin.strip() for origin in raw.split(',') if origin.strip()]
+
+
 # Initialize Flask app
 app = Flask(__name__)
-app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'heatpump-dashboard-secret-key')
-CORS(app)
+app.config['SECRET_KEY'] = _resolve_secret_key()
+
+CORS_ALLOWED_ORIGINS = _resolve_cors_origins()
+if CORS_ALLOWED_ORIGINS:
+    CORS(app, origins=CORS_ALLOWED_ORIGINS)
+    logger.info(f"🔒 CORS enabled for origins: {', '.join(CORS_ALLOWED_ORIGINS)}")
+else:
+    # No CORS extension registered → no Access-Control-Allow-Origin header →
+    # browsers enforce same-origin. This is the correct default for a
+    # self-contained dashboard.
+    logger.info("🔒 CORS restricted to same-origin (set CORS_ALLOWED_ORIGINS to widen)")
 
 # Initialize Socket.IO
+# cors_allowed_origins=None means "same origin only" in python-engineio ≥4,
+# which mirrors the HTTP behaviour above.
 socketio = SocketIO(
     app,
-    cors_allowed_origins="*",
+    cors_allowed_origins=CORS_ALLOWED_ORIGINS or None,
     async_mode='eventlet',
     ping_timeout=60,
     ping_interval=25
@@ -275,7 +346,11 @@ def save_settings():
     # Update values with validation
     if 'brand' in data and data['brand'] in ('thermia', 'ivt', 'nibe'):
         if data['brand'] != config.get('brand'):
-            needs_restart.append('brand')
+            # Both services resolve the provider once at process start, so both
+            # need restarting. Report real service names from
+            # RESTARTABLE_CONTAINERS — 'brand' is not one, and asking the client
+            # to restart it produced a 400 from /api/restart-service.
+            needs_restart.extend(['collector', 'dashboard'])
         config['brand'] = data['brand']
 
     if 'cop_flow_factor' in data:
@@ -321,6 +396,9 @@ def save_settings():
     if 'retention_days' in data:
         retention_days = config.get('retention', {}).get('days', 90)
         set_bucket_retention(retention_days)
+
+    # De-duplicate while preserving order (brand adds two services at once)
+    needs_restart = list(dict.fromkeys(needs_restart))
 
     return jsonify({
         'success': True,
@@ -962,6 +1040,12 @@ def get_initial_data():
     time_range = request.args.get('range', '24h')
 
     try:
+        validate_time_range(time_range)
+    except ValueError as e:
+        logger.warning(f"⚠️  Rejected invalid time range from client: {e}")
+        return jsonify({'error': str(e)}), 400
+
+    try:
         logger.info(f"📥 Loading initial data for range: {time_range}")
 
         # Use parallel fetching for much faster load times
@@ -1063,86 +1147,57 @@ def get_runtime_data_cached(cached_runtime_stats):
         return {'compressor_percent': 0, 'aux_heater_percent': 0, 'inactive_percent': 100}
 
 
+def _empty_sankey_payload():
+    """Sankey payload used when there is no usable COP measurement"""
+    return {
+        'nodes': [],
+        'links': [],
+        'cop': None,
+        'free_energy_percent': 0,
+        'has_data': False
+    }
+
+
 def get_sankey_data(time_range):
     """Build Sankey diagram data"""
     try:
         cop_df = data_query.calculate_cop(time_range)
         runtime_stats = data_query.calculate_runtime_stats(time_range)
-
-        # Calculate energy flows (same logic as Plotly version)
-        if cop_df.empty or 'estimated_cop' not in cop_df.columns:
-            avg_cop = 3.0
-            has_data = False
-        else:
-            avg_cop = float(cop_df['estimated_cop'].mean())
-            has_data = True
-
-        # Ensure reasonable COP value
-        if avg_cop < 1.5 or avg_cop > 5.0:
-            avg_cop = 3.5
-
-        # Calculate energy flows (normalized to 100 units electric power)
-        electric_power = 100
-        ground_energy = electric_power * (avg_cop - 1)
-        aux_heater_percent = runtime_stats.get('aux_heater_runtime_percent', 0)
-        aux_heater_power = (aux_heater_percent / 100) * 50 if aux_heater_percent > 0 else 0
-        total_heat = electric_power + ground_energy + aux_heater_power
-        free_energy_percent = (ground_energy / total_heat * 100) if total_heat > 0 else 0
-
-        # Build nodes and links
-        nodes = [
-            {'name': '🌍 Markenergi'},
-            {'name': '⚡ Elkraft'},
-            {'name': '🔄 Värmepump'},
-            {'name': '🏠 Värme till Hus'}
-        ]
-
-        links = [
-            {'source': '🌍 Markenergi', 'target': '🔄 Värmepump', 'value': ground_energy},
-            {'source': '⚡ Elkraft', 'target': '🔄 Värmepump', 'value': electric_power},
-            {'source': '🔄 Värmepump', 'target': '🏠 Värme till Hus', 'value': total_heat - aux_heater_power}
-        ]
-
-        if aux_heater_power > 5:
-            nodes.append({'name': '🔥 Tillsattsvärme'})
-            links.append({'source': '🔥 Tillsattsvärme', 'target': '🏠 Värme till Hus', 'value': aux_heater_power})
-
-        return {
-            'nodes': nodes,
-            'links': links,
-            'cop': avg_cop,
-            'free_energy_percent': free_energy_percent,
-            'has_data': has_data
-        }
+        return get_sankey_data_cached(cop_df, runtime_stats)
     except Exception as e:
         logger.error(f"Error getting Sankey data: {e}")
-        return {
-            'nodes': [],
-            'links': [],
-            'cop': 0,
-            'free_energy_percent': 0,
-            'has_data': False
-        }
+        return _empty_sankey_payload()
 
 
 def get_sankey_data_cached(cached_cop_df, cached_runtime_stats):
     """Build Sankey diagram data using pre-calculated COP and runtime stats (avoids redundant InfluxDB queries)"""
     try:
-        # Calculate energy flows (same logic as Plotly version)
+        # Report the measured COP or nothing at all.
+        #
+        # This previously replaced any value outside 1.5–5.0 with a hardcoded
+        # 3.5 while still reporting has_data=True — so a genuinely poor COP of
+        # 1.3, exactly what a monitoring dashboard exists to surface, was
+        # displayed as a healthy 3.5. NaN also slipped through, because every
+        # comparison against NaN is False.
         if cached_cop_df.empty or 'estimated_cop' not in cached_cop_df.columns:
-            avg_cop = 3.0
-            has_data = False
-        else:
-            avg_cop = float(cached_cop_df['estimated_cop'].mean())
-            has_data = True
+            return _empty_sankey_payload()
 
-        # Ensure reasonable COP value
-        if avg_cop < 1.5 or avg_cop > 5.0:
-            avg_cop = 3.5
+        cop_values = cached_cop_df['estimated_cop'].dropna()
+        if cop_values.empty:
+            return _empty_sankey_payload()
+
+        avg_cop = float(cop_values.mean())
+        if not math.isfinite(avg_cop):
+            return _empty_sankey_payload()
+
+        has_data = True
 
         # Calculate energy flows (normalized to 100 units electric power)
+        # A COP below 1 means no free ground energy at all; the flow diagram
+        # cannot draw a negative link, so clamp the *flow* at 0 while 'cop'
+        # below still reports the real measured value.
         electric_power = 100
-        ground_energy = electric_power * (avg_cop - 1)
+        ground_energy = max(0.0, electric_power * (avg_cop - 1))
         aux_heater_percent = cached_runtime_stats.get('aux_heater_runtime_percent', 0)
         aux_heater_power = (aux_heater_percent / 100) * 50 if aux_heater_percent > 0 else 0
         total_heat = electric_power + ground_energy + aux_heater_power
@@ -1175,13 +1230,7 @@ def get_sankey_data_cached(cached_cop_df, cached_runtime_stats):
         }
     except Exception as e:
         logger.error(f"Error getting cached Sankey data: {e}")
-        return {
-            'nodes': [],
-            'links': [],
-            'cop': 0,
-            'free_energy_percent': 0,
-            'has_data': False
-        }
+        return _empty_sankey_payload()
 
 
 def get_performance_data(time_range):
@@ -1756,7 +1805,15 @@ def handle_ping():
 def handle_time_range_change(data):
     """Handle time range change from client - PARALLELIZED"""
     client_id = request.sid
-    time_range = data.get('range', '24h')
+    payload = data if isinstance(data, dict) else {}
+    time_range = payload.get('range', '24h')
+
+    try:
+        validate_time_range(time_range)
+    except ValueError as e:
+        logger.warning(f"⚠️  Rejected invalid time range from client {client_id}: {e}")
+        emit('error', {'message': str(e)})
+        return
 
     logger.info(f"🔄 Client {client_id} changed time range to: {time_range}")
 
@@ -1782,7 +1839,15 @@ def handle_time_range_change(data):
 def handle_manual_update(data):
     """Handle manual update request from client - PARALLELIZED"""
     client_id = request.sid
-    time_range = data.get('range', '24h')
+    payload = data if isinstance(data, dict) else {}
+    time_range = payload.get('range', '24h')
+
+    try:
+        validate_time_range(time_range)
+    except ValueError as e:
+        logger.warning(f"⚠️  Rejected invalid time range from client {client_id}: {e}")
+        emit('error', {'message': str(e)})
+        return
 
     logger.info(f"🔄 Client {client_id} requested manual update")
 
@@ -1856,10 +1921,20 @@ if __name__ == '__main__':
     logger.info("🌐 Dashboard will be available at http://localhost:8050")
     logger.info("=" * 60)
 
+    # Debug mode is off unless FLASK_DEBUG is explicitly set. It leaks stack
+    # traces, file paths and config to any client that triggers an error, and
+    # contradicts FLASK_ENV=production in the Dockerfile.
+    debug_mode = _read_bool_env('FLASK_DEBUG', default=False)
+    if debug_mode:
+        logger.warning("⚠️  FLASK_DEBUG is enabled — tracebacks will be exposed to clients")
+
     socketio.run(
         app,
         host='0.0.0.0',
         port=8050,
-        debug=True,
+        debug=debug_mode,
+        # flask-socketio otherwise derives eventlet's access log from app.debug,
+        # so turning debug off would silently drop HTTP request logging too.
+        log_output=True,
         use_reloader=False  # Disable reloader to prevent duplicate background tasks
     )

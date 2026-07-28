@@ -617,17 +617,35 @@ async function saveSettings() {
         const result = await response.json();
 
         if (result.success) {
-            let msg = '<i class="fas fa-check me-2"></i>Inställningar sparade!';
+            alertEl.className = 'alert alert-success';
+            alertEl.innerHTML = '<i class="fas fa-check me-2"></i>Inställningar sparade!';
 
             if (result.needs_restart && result.needs_restart.length > 0) {
-                const services = result.needs_restart.join(', ');
-                msg += `<br><br>Ändringar kräver omstart av: <strong>${services}</strong>`;
-                msg += `<br><button class="btn btn-warning btn-sm mt-2" onclick="restartServices(${JSON.stringify(result.needs_restart)})">`;
-                msg += '<i class="fas fa-sync-alt me-1"></i>Starta om nu</button>';
+                // Build the restart button as a real element with a real
+                // listener. Interpolating JSON.stringify(...) into an onclick
+                // attribute injected via innerHTML meant the first double quote
+                // of ["collector"] terminated the attribute, so the handler
+                // never ran.
+                const services = result.needs_restart;
+
+                const note = document.createElement('div');
+                note.className = 'mt-2';
+                note.appendChild(document.createTextNode('Ändringar kräver omstart av: '));
+
+                const strong = document.createElement('strong');
+                strong.textContent = services.join(', ');
+                note.appendChild(strong);
+
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = 'btn btn-warning btn-sm mt-2 d-block';
+                btn.innerHTML = '<i class="fas fa-sync-alt me-1"></i>Starta om nu';
+                btn.addEventListener('click', () => restartServices(services));
+
+                alertEl.appendChild(note);
+                alertEl.appendChild(btn);
             }
 
-            alertEl.className = 'alert alert-success';
-            alertEl.innerHTML = msg;
             alertEl.classList.remove('d-none');
 
             // Reload settings to reflect actual state
@@ -655,10 +673,14 @@ async function saveSettings() {
 async function restartService(service) {
     const statusDiv = document.getElementById('restart-status');
     const statusAlert = document.getElementById('restart-status-alert');
+    // The per-service button only exists on the settings panel; this is also
+    // called from the post-save prompt, where it may not be rendered.
     const btn = document.getElementById(`btn-restart-${service}`);
 
-    btn.disabled = true;
-    btn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>Startar om...';
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>Startar om...';
+    }
 
     statusDiv.classList.remove('d-none');
     statusAlert.className = 'alert alert-info mb-0 py-2';
@@ -683,8 +705,10 @@ async function restartService(service) {
         statusAlert.className = 'alert alert-danger mb-0 py-2';
         statusAlert.innerHTML = `<i class="fas fa-exclamation-triangle me-2"></i>Fel: ${error.message}`;
     } finally {
-        btn.disabled = false;
-        btn.innerHTML = '<i class="fas fa-sync-alt me-1"></i>Starta om';
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fas fa-sync-alt me-1"></i>Starta om';
+        }
         setTimeout(() => statusDiv.classList.add('d-none'), 5000);
     }
 }

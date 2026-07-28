@@ -21,22 +21,22 @@ providers/
 ├── thermia/
 │   ├── provider.py           # Thermia-specific implementation
 │   ├── registers.py          # Thermia register definitions
-│   ├── alarms.py             # Thermia alarm codes
-│   ├── dashboard_components.py  # Thermia UI components
-│   └── callbacks.py          # Thermia callback functions
+│   └── alarms.py             # Thermia alarm codes
 ├── ivt/
 │   ├── provider.py           # IVT-specific implementation
 │   ├── registers.py          # IVT register definitions (Rego 600/637)
-│   ├── alarms.py             # IVT alarm codes
-│   ├── dashboard_components.py  # IVT UI components
-│   └── callbacks.py          # IVT callback functions
+│   └── alarms.py             # IVT alarm codes
 └── nibe/
     ├── provider.py           # NIBE-specific implementation
     ├── registers.py          # NIBE register definitions (F/S-series)
-    ├── alarms.py             # NIBE alarm codes
-    ├── dashboard_components.py  # NIBE UI components
-    └── callbacks.py          # NIBE callback functions
+    └── alarms.py             # NIBE alarm codes
 ```
+
+> **Not:** Tidigare fanns även `dashboard_components.py` och `callbacks.py` per
+> märke. De hörde till den gamla Dash-baserade dashboarden, importerade paket
+> (`dash`, `dash_bootstrap_components`) som inte längre finns i någon
+> `requirements.txt`, och laddades inte av provider-factoryn. De är borttagna —
+> hämta dem ur git-historiken om de behövs.
 
 ### Hybrid Dashboard
 
@@ -52,7 +52,7 @@ Dashboarden använder en **hybrid approach**:
   - Sankey energiflöde
   - Systemschema
 
-- **Märkesspecifika komponenter** (med egna callbacks):
+- **Märkesspecifika komponenter** (drivs av respektive `provider.py`):
   - **Thermia**:
     - Pumpvarvtal (cirkulationspump, köldbärarpump)
     - Driftläge (Auto, Normal, etc.)
@@ -319,22 +319,13 @@ Varje register **måste** ha ett `type` fält för korrekt datahantering:
 | `setting` | Inställningar | Nej |
 | `current` | Ström (A) | Nej |
 
-### Dashboard components (optional)
+### Märkesspecifik UI
 
-Om du vill ha märkesspecifika UI-komponenter:
-
-```python
-# providers/bosch/dashboard_components.py
-def create_bosch_specific_section():
-    # Skapa UI-komponenter med unika ID:n (bosch-*)
-    ...
-
-# providers/bosch/callbacks.py
-def register_bosch_callbacks(app, data_query):
-    @app.callback(Output('bosch-xxx', 'children'), ...)
-    def update_bosch_xxx(n):
-        ...
-```
+Den nuvarande dashboarden är byggd på Flask + Socket.IO + ECharts, inte Dash.
+Märkesspecifika vyer styrs därför av vad providern exponerar
+(`get_registers()`, `get_brand_specific_features()`, `get_status_field_names()`
+m.fl. i `provider.py`) — det finns inga per-märke
+`dashboard_components.py`/`callbacks.py` längre.
 
 ## Körning
 

@@ -35,6 +35,38 @@ from providers import get_provider
 logger = logging.getLogger(__name__)
 
 
+# Tillåtna tidsperioder som får interpoleras in i Flux-queries.
+#
+# Detta är säkerhetsgränsen mot Flux-injektion: varje värde som når
+# `|> range(start: -{time_range})` måste komma härifrån. Listan är medvetet
+# hårdkodad i stället för läst från config.yaml, eftersom dashboarden själv
+# skriver om config.yaml via /api/settings — en tillåtelselista som webbappen
+# kan redigera är ingen tillåtelselista. Håll i synk med
+# `dashboard.time_ranges` i config.yaml.
+VALID_TIME_RANGES = frozenset({'1h', '6h', '24h', '7d', '30d', '90d'})
+
+
+def validate_time_range(time_range: str) -> str:
+    """
+    Validate a client-supplied time range before it reaches a Flux query.
+
+    Args:
+        time_range: Candidate range, e.g. '24h'
+
+    Returns:
+        The same value, unchanged, when it is on the allowlist.
+
+    Raises:
+        ValueError: If the value is not an allowed time range.
+    """
+    if not isinstance(time_range, str) or time_range not in VALID_TIME_RANGES:
+        raise ValueError(
+            f"Invalid time range: {time_range!r} "
+            f"(allowed: {', '.join(sorted(VALID_TIME_RANGES))})"
+        )
+    return time_range
+
+
 class HeatPumpDataQuery:
     """Query data from InfluxDB with advanced calculations"""
 
@@ -86,7 +118,12 @@ class HeatPumpDataQuery:
 
         Returnerar lämpligt aggregeringsfönster för att balansera prestanda och noggrannhet.
         Mer aggressiv nedsampling för längre perioder för bättre prestanda.
+
+        Kastar ValueError för okända perioder i stället för att tyst falla
+        tillbaka på "5m" — en tyst default dolde tidigare felaktiga värden.
         """
+        validate_time_range(time_range)
+
         # Extrahera numeriskt värde och enhet från time_range (t.ex. "24h", "7d")
         if time_range.endswith('h'):
             hours = int(time_range[:-1])
@@ -122,7 +159,14 @@ class HeatPumpDataQuery:
             metric_names: Lista över metrics att hämta
             time_range: Tidsperiod (t.ex. '24h', '7d')
             aggregation_window: Specifikt aggregeringsfönster (None = automatisk)
+
+        Raises:
+            ValueError: Om time_range inte är en tillåten period.
         """
+        # Validera utanför try — annars sväljs felet och en injicerad period
+        # skulle bara ge en tom DataFrame i stället för ett tydligt fel.
+        validate_time_range(time_range)
+
         try:
             # Get status fields from provider (brand-aware)
             # Status fields should use 'last' aggregation, not 'mean'
@@ -200,7 +244,13 @@ class HeatPumpDataQuery:
 
         Returns:
             DataFrame in wide format with _time as index column
+
+        Raises:
+            ValueError: If time_range is not an allowed period.
         """
+        # Validate outside try — see query_metrics().
+        validate_time_range(time_range)
+
         try:
             start_time = time.time()
 
@@ -335,7 +385,13 @@ class HeatPumpDataQuery:
         """Get MIN, MAX and MEAN values for all metrics over the specified time range
 
         OPTIMIZED: Single query with union instead of 3 separate DB queries
+
+        Raises:
+            ValueError: If time_range is not an allowed period.
         """
+        # Validate outside try — see query_metrics().
+        validate_time_range(time_range)
+
         try:
             query = f'''
                 data = from(bucket: "{self.bucket}")
@@ -856,7 +912,11 @@ class HeatPumpDataQuery:
 
         Uses finer granularity than batch queries for smoother visualization
         UPDATED: 10m for both 7d and 30d for consistent fine granularity
+
+        Raises ValueError on unknown ranges rather than silently defaulting.
         """
+        validate_time_range(time_range)
+
         if time_range.endswith('h'):
             hours = int(time_range[:-1])
             if hours <= 1:

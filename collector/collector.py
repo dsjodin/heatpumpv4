@@ -137,6 +137,7 @@ class HeatPumpAPICollector:
             # Store raw values as integers (no division by 10)
             # Dashboard will handle conversion when displaying
             processed_data = {}
+            skipped = []
             for register_id, raw_value in data.items():
                 register_id_upper = register_id.upper()
 
@@ -146,7 +147,21 @@ class HeatPumpAPICollector:
                     continue
 
                 # Store all values as integers (raw from API)
-                processed_data[register_id_upper] = int(raw_value)
+                # Convert per register: a single non-numeric or null value from
+                # the gateway must not discard the whole collection cycle.
+                try:
+                    processed_data[register_id_upper] = int(raw_value)
+                except (TypeError, ValueError):
+                    skipped.append(register_id_upper)
+                    logger.debug(
+                        f"Skipping non-numeric register {register_id_upper}={raw_value!r}"
+                    )
+
+            if skipped:
+                logger.warning(
+                    f"Skipped {len(skipped)} register(s) with non-numeric values: "
+                    f"{', '.join(sorted(skipped))}"
+                )
 
             return processed_data
 

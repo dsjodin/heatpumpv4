@@ -643,37 +643,37 @@ Worth stating plainly, because these are the parts to build on:
 
 ### P0 — do first (security & silent wrongness)
 
-| # | Item | Ref | Effort |
-|---|---|---|---|
-| 1 | Remove the Docker socket mount, or put the whole app behind auth | §2.1 | M |
-| 2 | Whitelist `time_range` before it reaches Flux | §2.2 | **S** |
-| 3 | Issue scoped InfluxDB tokens; stop using the admin token | §2.2 | S |
-| 4 | `debug=False` in production | §2.3 | **S** |
-| 5 | Restrict CORS; require `SECRET_KEY` | §2.4 | **S** |
-| 6 | Wire up `electricity_price`, `collection_interval`, `refresh_interval` | §3.1 | S |
-| 7 | Per-register `try/except` in the collector | §3.5 | **S** |
+| # | Item | Ref | Effort | Status |
+|---|---|---|---|---|
+| 1 | Remove the Docker socket mount, or put the whole app behind auth | §2.1 | M | ⬜ deferred by decision |
+| 2 | Whitelist `time_range` before it reaches Flux | §2.2 | **S** | ✅ done |
+| 3 | Issue scoped InfluxDB tokens; stop using the admin token | §2.2 | S | ⬜ needs deployment change |
+| 4 | `debug=False` in production | §2.3 | **S** | ✅ done |
+| 5 | Restrict CORS; require `SECRET_KEY` | §2.4 | **S** | ✅ done |
+| 6 | Wire up `electricity_price`, `collection_interval`, `refresh_interval` | §3.1 | S | ⬜ |
+| 7 | Per-register `try/except` in the collector | §3.5 | **S** | ✅ done |
 
 Items 2, 4, 5, and 7 are roughly 20 lines total and remove most of the risk.
 
 ### P1 — next (correctness & confidence)
 
-| # | Item | Ref | Effort |
-|---|---|---|---|
-| 8 | Add pytest + ruff + a CI workflow | §7 | M |
-| 9 | Unit-test the four numerical functions | §7 | M |
-| 10 | Fix the restart-button quoting bug | §3.3 | **S** |
-| 11 | Provider metric-alias layer; fix NIBE names | §3.4 | M |
-| 12 | Stop fabricating COP 3.5 | §3.8 | **S** |
-| 13 | Return 400 on invalid settings | §3.9 | S |
-| 14 | Make `scale`/`signed` authoritative; verify the `percentage` ÷10 behaviour | §3.6 | M |
-| 15 | Fine-grained query for hot-water cycles | §3.7 | S |
+| # | Item | Ref | Effort | Status |
+|---|---|---|---|---|
+| 8 | Add pytest + ruff + a CI workflow | §7 | M | ⬜ |
+| 9 | Unit-test the four numerical functions | §7 | M | ⬜ |
+| 10 | Fix the restart-button quoting bug | §3.3 | **S** | ✅ done |
+| 11 | Provider metric-alias layer; fix NIBE names | §3.4 | M | ⬜ |
+| 12 | Stop fabricating COP 3.5 | §3.8 | **S** | ✅ done |
+| 13 | Return 400 on invalid settings | §3.9 | S | ⬜ |
+| 14 | Make `scale`/`signed` authoritative; verify the `percentage` ÷10 behaviour | §3.6 | M | ⬜ |
+| 15 | Fine-grained query for hot-water cycles | §3.7 | S | ⬜ |
 
 ### P2 — then (cleanup & performance)
 
 | # | Item | Ref | Effort |
 |---|---|---|---|
 | 16 | Delete the 11 dead `app.py` functions and the duplicate Sankey/status bodies | §4.1 | S |
-| 17 | Delete the Dash-era `callbacks.py` / `dashboard_components.py` | §4.2 | **S** |
+| 17 | Delete the Dash-era `callbacks.py` / `dashboard_components.py` | §4.2 | **S** | ✅ done |
 | 18 | Group background updates by `time_range` | §5.2 | S |
 | 19 | Delete the GreenPool, or move queries into it | §5.1 | S |
 | 20 | Vectorise the runtime and hot-water loops | §5.3 | M |
@@ -685,6 +685,28 @@ Items 2, 4, 5, and 7 are roughly 20 lines total and remove most of the risk.
 **Suggested first commit** — items 2, 4, 5, 7, 10, 12, 17. All small, all independent, and together
 they close the cheapest security holes, fix two user-visible bugs, and delete ~1 000 lines of dead
 code.
+
+---
+
+## 11. Mitigation log
+
+**2026-07-28 — suggested first commit applied** (items 2, 4, 5, 7, 10, 12, 17).
+
+Constraints this pass: code-only (no `docker-compose.yml` or `Dockerfile` edits), LAN-only threat
+model, Docker socket mount retained by decision.
+
+| Item | What changed |
+|---|---|
+| 2 | `VALID_TIME_RANGES` + `validate_time_range()` in `data_query.py`. Enforced at the three client entry points (400 / socket `error`) **and** inside `query_metrics`, `query_metrics_wide`, `get_min_max_values` — outside their `try` blocks, which would otherwise swallow the rejection into an empty DataFrame. Both `_get_aggregation_window` helpers now raise instead of silently returning `"5m"`. |
+| 4 | `debug` driven by `FLASK_DEBUG`, default `False`. `log_output=True` passed explicitly so HTTP access logs survive the change. |
+| 5 | `CORS(app)` registered only when `CORS_ALLOWED_ORIGINS` is set; same-origin otherwise. Socket.IO mirrors it. `SECRET_KEY` falls back to a per-process random key, never a published constant — both known-published defaults are rejected. |
+| 7 | Per-register `try/except` around `int(raw_value)` in the collector, with one summary `WARNING` per cycle. |
+| 10 | Restart button built via `createElement` + `addEventListener`. Also: `needs_restart` now reports real service names (`collector`/`dashboard`) instead of `brand`, which was not in `RESTARTABLE_CONTAINERS` and 400'd; `restartService` no longer throws when its button is absent. |
+| 12 | Measured COP is reported as-is or the payload reports `has_data: false`. Also closed a NaN hole (every comparison against NaN is false, so an all-NaN column previously passed through as real data) and clamped the ground-energy *flow* at 0 for COP < 1 while `cop` still carries the true value. |
+| 17 | Six Dash-era files deleted (~1 056 lines); `MULTI_BRAND_README.md` updated to match. |
+
+Deferred deliberately: item 1 (socket mount), item 3 (scoped InfluxDB tokens — needs a deployment
+change), and everything else in P1/P2.
 
 ---
 
