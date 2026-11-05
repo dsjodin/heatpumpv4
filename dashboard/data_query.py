@@ -334,42 +334,60 @@ class HeatPumpDataQuery:
     def get_min_max_values(self, time_range: str = '24h') -> Dict[str, Dict[str, float]]:
         """Get MIN, MAX and MEAN values for all metrics over the specified time range
 
-        OPTIMIZED: Single query with union instead of 3 separate DB queries
+        OPTIMIZED: Uses vectorized dict conversion instead of iterrows()
         """
         try:
-            query = f'''
-                data = from(bucket: "{self.bucket}")
+            query_min = f'''
+                from(bucket: "{self.bucket}")
                     |> range(start: -{time_range})
                     |> filter(fn: (r) => r._measurement == "heatpump")
                     |> group(columns: ["name"])
-
-                min_data = data |> min() |> map(fn: (r) => ({{r with _stat: "min"}}))
-                max_data = data |> max() |> map(fn: (r) => ({{r with _stat: "max"}}))
-                mean_data = data |> mean() |> map(fn: (r) => ({{r with _stat: "mean"}}))
-
-                union(tables: [min_data, max_data, mean_data])
-                    |> group(columns: ["name", "_stat"])
+                    |> min()
             '''
 
-            result = self.query_api.query_data_frame(query)
+            query_max = f'''
+                from(bucket: "{self.bucket}")
+                    |> range(start: -{time_range})
+                    |> filter(fn: (r) => r._measurement == "heatpump")
+                    |> group(columns: ["name"])
+                    |> max()
+            '''
 
-            if isinstance(result, list):
-                result = pd.concat(result, ignore_index=True)
+            query_mean = f'''
+                from(bucket: "{self.bucket}")
+                    |> range(start: -{time_range})
+                    |> filter(fn: (r) => r._measurement == "heatpump")
+                    |> group(columns: ["name"])
+                    |> mean()
+            '''
 
-            if result.empty:
-                return {}
+            result_min = self.query_api.query_data_frame(query_min)
+            result_max = self.query_api.query_data_frame(query_max)
+            result_mean = self.query_api.query_data_frame(query_mean)
 
-            # Build min/max/avg dict from combined result
+            if isinstance(result_min, list):
+                result_min = pd.concat(result_min, ignore_index=True)
+            if isinstance(result_max, list):
+                result_max = pd.concat(result_max, ignore_index=True)
+            if isinstance(result_mean, list):
+                result_mean = pd.concat(result_mean, ignore_index=True)
+
+            # Vectorized: convert to dicts using set_index
+            min_dict = result_min.set_index('name')['_value'].to_dict() if not result_min.empty else {}
+            max_dict = result_max.set_index('name')['_value'].to_dict() if not result_max.empty else {}
+            avg_dict = result_mean.set_index('name')['_value'].to_dict() if not result_mean.empty else {}
+
+            # Combine into single dict
+            all_metrics = set(min_dict.keys()) | set(max_dict.keys()) | set(avg_dict.keys())
             min_max = {}
-            for _, row in result.iterrows():
-                metric_name = row.get('name')
-                stat = row.get('_stat')
-                value = row.get('_value')
-                if metric_name and stat and value is not None:
-                    if metric_name not in min_max:
-                        min_max[metric_name] = {}
-                    stat_key = 'avg' if stat == 'mean' else stat
-                    min_max[metric_name][stat_key] = value
+            for metric_name in all_metrics:
+                min_max[metric_name] = {}
+                if metric_name in min_dict:
+                    min_max[metric_name]['min'] = min_dict[metric_name]
+                if metric_name in max_dict:
+                    min_max[metric_name]['max'] = max_dict[metric_name]
+                if metric_name in avg_dict:
+                    min_max[metric_name]['avg'] = avg_dict[metric_name]
 
             return min_max
 
