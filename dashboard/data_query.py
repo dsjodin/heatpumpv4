@@ -336,70 +336,44 @@ class HeatPumpDataQuery:
             logger.error(f"Error getting latest values: {e}")
             return {}
     
-    def get_min_max_values(self, time_range: str = '24h') -> Dict[str, Dict[str, float]]:
-        """Get MIN, MAX and MEAN values for all metrics over the specified time range
-
-        OPTIMIZED: Uses vectorized dict conversion instead of iterrows()
-        """
+    def get_stat_values(self, stat: str, time_range: str = '24h', names: Optional[List[str]] = None) -> Dict[str, float]:
+        """min, max or mean per metric over raw data in the time range, for all metrics or only `names`.
+        One query per stat (a union of all three lost values, see deeba5b), so they can run in parallel."""
+        assert stat in ('min', 'max', 'mean')
+        name_filter = ''
+        if names:
+            name_filter = '|> filter(fn: (r) => ' + ' or '.join(f'r.name == "{n}"' for n in names) + ')'
+        query = f'''
+            from(bucket: "{self.bucket}")
+                |> range(start: -{time_range})
+                |> filter(fn: (r) => r._measurement == "heatpump")
+                {name_filter}
+                |> group(columns: ["name"])
+                |> {stat}()
+        '''
         try:
-            query_min = f'''
-                from(bucket: "{self.bucket}")
-                    |> range(start: -{time_range})
-                    |> filter(fn: (r) => r._measurement == "heatpump")
-                    |> group(columns: ["name"])
-                    |> min()
-            '''
-
-            query_max = f'''
-                from(bucket: "{self.bucket}")
-                    |> range(start: -{time_range})
-                    |> filter(fn: (r) => r._measurement == "heatpump")
-                    |> group(columns: ["name"])
-                    |> max()
-            '''
-
-            query_mean = f'''
-                from(bucket: "{self.bucket}")
-                    |> range(start: -{time_range})
-                    |> filter(fn: (r) => r._measurement == "heatpump")
-                    |> group(columns: ["name"])
-                    |> mean()
-            '''
-
-            result_min = self.query_api.query_data_frame(query_min)
-            result_max = self.query_api.query_data_frame(query_max)
-            result_mean = self.query_api.query_data_frame(query_mean)
-
-            if isinstance(result_min, list):
-                result_min = pd.concat(result_min, ignore_index=True)
-            if isinstance(result_max, list):
-                result_max = pd.concat(result_max, ignore_index=True)
-            if isinstance(result_mean, list):
-                result_mean = pd.concat(result_mean, ignore_index=True)
-
-            # Vectorized: convert to dicts using set_index
-            min_dict = result_min.set_index('name')['_value'].to_dict() if not result_min.empty else {}
-            max_dict = result_max.set_index('name')['_value'].to_dict() if not result_max.empty else {}
-            avg_dict = result_mean.set_index('name')['_value'].to_dict() if not result_mean.empty else {}
-
-            # Combine into single dict
-            all_metrics = set(min_dict.keys()) | set(max_dict.keys()) | set(avg_dict.keys())
-            min_max = {}
-            for metric_name in all_metrics:
-                min_max[metric_name] = {}
-                if metric_name in min_dict:
-                    min_max[metric_name]['min'] = min_dict[metric_name]
-                if metric_name in max_dict:
-                    min_max[metric_name]['max'] = max_dict[metric_name]
-                if metric_name in avg_dict:
-                    min_max[metric_name]['avg'] = avg_dict[metric_name]
-
-            return min_max
-
+            result = self.query_api.query_data_frame(query)
+            if isinstance(result, list):
+                result = pd.concat(result, ignore_index=True) if result else pd.DataFrame()
+            return result.set_index('name')['_value'].to_dict() if not result.empty else {}
         except Exception as e:
-            logger.error(f"Error getting min/max values: {e}")
+            logger.error(f"Error getting {stat} values: {e}")
             return {}
 
+    @staticmethod
+    def combine_min_max(min_dict: Dict[str, float], max_dict: Dict[str, float],
+                        avg_dict: Dict[str, float]) -> Dict[str, Dict[str, float]]:
+        """{name: {'min', 'max', 'avg'}} from the three get_stat_values() results"""
+        min_max = {}
+        for name in set(min_dict) | set(max_dict) | set(avg_dict):
+            min_max[name] = {}
+            if name in min_dict:
+                min_max[name]['min'] = min_dict[name]
+            if name in max_dict:
+                min_max[name]['max'] = max_dict[name]
+            if name in avg_dict:
+                min_max[name]['avg'] = avg_dict[name]
+        return min_max
 
     def get_alarm_status_from_df(self, df: pd.DataFrame) -> Dict[str, Any]:
         """
@@ -762,14 +736,19 @@ class HeatPumpDataQuery:
         else:
             return "5m"
     
-    def calculate_energy_costs(self, time_range: str = '24h', price_per_kwh: float = 2.0) -> Dict[str, Any]:
+    def calculate_energy_costs(self, time_range: str = '24h', price_per_kwh: float = 2.0,
+                               df: Optional[pd.DataFrame] = None) -> Dict[str, Any]:
         """
         Calculate energy consumption and costs
-        
+
         KORREKT: Använder verklig tid mellan datapunkter
+        df: pre-fetched query_metrics() frame for the same range (skips the query)
         """
         try:
-            df = self.query_metrics(['power_consumption'], time_range)
+            if df is None:
+                df = self.query_metrics(['power_consumption'], time_range)
+            elif not df.empty:
+                df = df[df['name'] == 'power_consumption']
             
             if df.empty:
                 return {
@@ -810,15 +789,19 @@ class HeatPumpDataQuery:
                 'peak_power': 0
             }
     
-    def calculate_runtime_stats(self, time_range: str = '24h') -> Dict[str, Any]:
+    def calculate_runtime_stats(self, time_range: str = '24h', df: Optional[pd.DataFrame] = None) -> Dict[str, Any]:
         """
         Calculate runtime statistics for compressor and auxiliary heater
-        
+
         KORREKT: Använder verklig tid mellan datapunkter
+        df: pre-fetched query_metrics() frame for the same range (skips the query)
         """
         try:
             metrics = ['compressor_status', 'additional_heat_percent']
-            df = self.query_metrics(metrics, time_range)
+            if df is None:
+                df = self.query_metrics(metrics, time_range)
+            elif not df.empty:
+                df = df[df['name'].isin(metrics)]
             
             if df.empty:
                 return {

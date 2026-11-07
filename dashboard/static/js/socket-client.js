@@ -24,9 +24,15 @@ socket.on('connect', () => {
     console.log('✅ WebSocket connected');
     connected = true;
     updateConnectionStatus(true);
-    loadInitialData(currentTimeRange);
+    // Initial data is loaded over HTTP at page load; after a reconnect ask for fresh data
+    if (hasConnected) socket.emit('request_update', { range: currentTimeRange });
+    hasConnected = true;
     loadVersionInfo();
 });
+
+// Don't wait for the WebSocket handshake: start loading as soon as all scripts have run
+let hasConnected = false;
+document.addEventListener('DOMContentLoaded', () => loadInitialData(currentTimeRange));
 
 socket.on('disconnect', () => {
     console.log('❌ WebSocket disconnected');
