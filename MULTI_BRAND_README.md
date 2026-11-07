@@ -332,6 +332,12 @@ live-vyn och visar live-värden från databasen.
 - Vald komponent har en liten fyrkant för storlek (Shift = behåll proportioner); rörbredd i panelen eller under Layout
 - Klick i `Register`, `Aktiv när` eller `Flöde när` öppnar en lista med alla register, beskrivning och
   live-värde (register med värde överst). Skriv för att filtrera, piltangenter + Enter eller klick för att välja
+- `Aktiv när` / `Flöde när` byggs med en rad per villkor: register, jämförelse (är på, större än,
+  mindre än, lika med, inte lika med) och värde. Flera rader kombineras med "alla" eller "något".
+  Varje rad visar registrets beskrivning och om villkoret stämmer just nu. `JSON` växlar till fritext.
+- Villkoren läser register från värmepumpen, inte andra objekt. Växelventilen och tanken följer t.ex.
+  båda registret `switch_valve_status` (0 = radiator, 1 = varmvatten).
+- `name` är ett valfritt namn som bara syns i editorn
 - `Kopiera från` hämtar ett annat märkes layout som startpunkt
 - `Visa allt aktivt` tänder alla animationer
 - Ctrl+Z ångra, Ctrl+D duplicera, Delete ta bort, Esc avmarkera

@@ -396,7 +396,7 @@ def validate_schema_layout(layout):
     return errors
 
 
-SCHEMA_KEY_ORDER = ['type', 'medium', 'width', 'x', 'y', 'w', 'h', 'r', 'size', 'points', 'label', 'text',
+SCHEMA_KEY_ORDER = ['type', 'name', 'medium', 'width', 'x', 'y', 'w', 'h', 'r', 'size', 'points', 'label', 'text',
                     'value', 'unit', 'decimals', 'key', 'gt', 'lt', 'eq', 'ne', 'all', 'any',
                     'active', 'flow', 'rows', 'steps']
 

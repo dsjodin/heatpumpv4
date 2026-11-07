@@ -972,6 +972,15 @@ body {
 .sed-overlay .sed-sel { fill: none; stroke: #1c7ed6; stroke-width: 2; stroke-dasharray: 6 4; pointer-events: none; }
 .sed-overlay .sed-resize { fill: #1c7ed6; stroke: #fff; stroke-width: 1.5; cursor: nwse-resize; }
 .sed-overlay .sed-handle { fill: #fff; stroke: #1c7ed6; stroke-width: 2; cursor: grab; }
+.sed-cond { border: 1px solid #e9ecef; border-radius: 6px; padding: 0.4rem; margin-bottom: 0.5rem; background: #fafbfc; }
+.sed-cond > .form-select { margin-bottom: 0.3rem; }
+.sed-cond-head { display: flex; justify-content: space-between; align-items: baseline; }
+.sed-cond-help { font-size: 0.75rem; color: #868e96; margin-bottom: 0.3rem; }
+.sed-cond-row { display: grid; grid-template-columns: minmax(0, 1fr) 5rem auto; gap: 0.25rem; margin-top: 0.4rem; }
+.sed-cond-row input[type=text] { grid-column: 1 / -1; font-family: monospace; }
+.sed-cond-row input[hidden] { display: block; visibility: hidden; }
+.sed-cond-meta { font-size: 0.72rem; color: #495057; margin: 0.15rem 0 0.2rem; }
+.sed-cond-tools { display: flex; justify-content: space-between; margin-top: 0.3rem; }
 .sed-picker {
     position: fixed;
     z-index: 1000;
