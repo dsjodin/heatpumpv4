@@ -34,11 +34,30 @@ from providers import get_provider
 
 logger = logging.getLogger(__name__)
 
+CONFIG_PATH = '/app/config.yaml'
+_config_cache = {'mtime': None, 'data': {}}
+
+
+def load_config() -> Dict[str, Any]:
+    """Read config.yaml, re-reading only when the file has changed"""
+    try:
+        mtime = os.path.getmtime(CONFIG_PATH)
+    except OSError:
+        return {}
+    if mtime != _config_cache['mtime']:
+        try:
+            with open(CONFIG_PATH, 'r') as f:
+                _config_cache['data'] = yaml.safe_load(f) or {}
+            _config_cache['mtime'] = mtime
+        except Exception as e:
+            logger.warning(f"Could not read {CONFIG_PATH}: {e}")
+    return _config_cache['data']
+
 
 class HeatPumpDataQuery:
     """Query data from InfluxDB with advanced calculations"""
 
-    def __init__(self, config_path: str = '/app/config.yaml'):
+    def __init__(self):
         """Initialize InfluxDB client and load provider"""
         self.url = os.getenv('INFLUXDB_URL', 'http://influxdb:8086')
         self.token = os.getenv('INFLUXDB_TOKEN')
@@ -47,39 +66,25 @@ class HeatPumpDataQuery:
         self.client = InfluxDBClient(url=self.url, token=self.token, org=self.org)
         self.query_api = self.client.query_api()
 
-        # Load provider and settings based on config
-        self.provider, self.cop_flow_factor, self.hw_min_cycle_minutes = self._load_provider_and_settings(config_path)
+        brand = load_config().get('brand') or os.getenv('HEATPUMP_BRAND', 'thermia')
+        try:
+            self.provider = get_provider(brand)
+        except Exception as e:
+            logger.warning(f"Failed to load provider '{brand}': {e}, defaulting to Thermia")
+            from providers.thermia.provider import ThermiaProvider
+            self.provider = ThermiaProvider()
         self.alarm_codes = self.provider.get_alarm_codes()
         self.alarm_register_id = self.provider.get_alarm_register_id()
-        logger.info(f"Data query initialized for {self.provider.get_display_name()}, COP flow factor: {self.cop_flow_factor}, HW min cycle: {self.hw_min_cycle_minutes} min")
+        logger.info(f"Data query initialized for {self.provider.get_display_name()}")
 
-    def _load_provider_and_settings(self, config_path: str):
-        """Load provider and settings from config"""
-        cop_flow_factor = 2.7  # Default: ~0.65 L/s flow rate
-        hw_min_cycle_minutes = 2  # Default: 2 minutes minimum
+    @property
+    def cop_flow_factor(self) -> float:
+        return load_config().get('cop', {}).get('flow_factor', 2.7)
 
-        try:
-            if os.path.exists(config_path):
-                with open(config_path, 'r') as f:
-                    config = yaml.safe_load(f)
-                brand = config.get('brand', 'thermia')
+    @property
+    def hw_min_cycle_minutes(self) -> int:
+        return load_config().get('hot_water', {}).get('min_cycle_minutes', 2)
 
-                # Load COP settings
-                cop_config = config.get('cop', {})
-                cop_flow_factor = cop_config.get('flow_factor', 2.7)
-
-                # Load hot water settings
-                hw_config = config.get('hot_water', {})
-                hw_min_cycle_minutes = hw_config.get('min_cycle_minutes', 2)
-            else:
-                brand = os.getenv('HEATPUMP_BRAND', 'thermia')
-
-            return get_provider(brand), cop_flow_factor, hw_min_cycle_minutes
-        except Exception as e:
-            logger.warning(f"Failed to load provider from config: {e}, defaulting to Thermia")
-            from providers.thermia.provider import ThermiaProvider
-            return ThermiaProvider(), cop_flow_factor, hw_min_cycle_minutes
-    
     def _get_aggregation_window(self, time_range: str) -> str:
         """
         NYTT: Dynamisk aggregering baserat på tidsperiod
@@ -127,7 +132,7 @@ class HeatPumpDataQuery:
             # Get status fields from provider (brand-aware)
             # Status fields should use 'last' aggregation, not 'mean'
             # (averaging 0/1 values gives meaningless fractional results)
-            status_fields = set(self.provider.get_status_field_names())
+            status_fields = set(self.provider.get_status_field_names()) | {'alarm_code'}
 
             # Split metrics into status and non-status
             status_metrics = [m for m in metric_names if m in status_fields]
@@ -395,66 +400,6 @@ class HeatPumpDataQuery:
             logger.error(f"Error getting min/max values: {e}")
             return {}
 
-    def calculate_min_max_from_df(self, df: pd.DataFrame) -> Dict[str, Dict[str, float]]:
-        """
-        Calculate MIN, MAX and MEAN values from pre-fetched DataFrame
-
-        OPTIMIZED: Avoids 3 separate InfluxDB queries by using batch data
-        This saves ~2-3s of load time when min/max values are needed
-        """
-        try:
-            if df.empty:
-                return {}
-
-            min_max = {}
-
-            # Group by metric name and calculate statistics
-            for metric_name in df['name'].unique():
-                metric_df = df[df['name'] == metric_name]
-                values = metric_df['_value'].dropna()
-
-                if len(values) > 0:
-                    min_max[metric_name] = {
-                        'min': float(values.min()),
-                        'max': float(values.max()),
-                        'avg': float(values.mean())
-                    }
-
-            return min_max
-
-        except Exception as e:
-            logger.error(f"Error calculating min/max from dataframe: {e}")
-            return {}
-
-    def get_latest_values_from_df(self, df: pd.DataFrame) -> Dict[str, Any]:
-        """
-        Get latest values for all metrics from pre-fetched DataFrame
-
-        OPTIMIZED: Avoids separate InfluxDB query by using batch data
-        Takes the most recent row for each metric
-        """
-        try:
-            if df.empty:
-                return {}
-
-            latest = {}
-
-            # Get the last row for each metric (data is already sorted by time in query)
-            for metric_name in df['name'].unique():
-                metric_df = df[df['name'] == metric_name].sort_values('_time')
-                if not metric_df.empty:
-                    last_row = metric_df.iloc[-1]
-                    latest[metric_name] = {
-                        'value': last_row['_value'],
-                        'unit': last_row.get('unit', ''),
-                        'time': last_row['_time']
-                    }
-
-            return latest
-
-        except Exception as e:
-            logger.error(f"Error getting latest values from dataframe: {e}")
-            return {}
 
     def get_alarm_status_from_df(self, df: pd.DataFrame) -> Dict[str, Any]:
         """
@@ -730,8 +675,7 @@ class HeatPumpDataQuery:
             )
 
             # Create interval groups (e.g., 15-minute intervals)
-            # Use 'T' suffix for broader pandas compatibility
-            df['interval'] = df['_time'].dt.floor(f'{interval_minutes}T')
+            df['interval'] = df['_time'].dt.floor(f'{interval_minutes}min')
 
             logger.debug(f"calculate_cop_from_pivot: Valid samples: {valid_mask.sum()}/{len(df)}, total heat: {df['heat_kwh'].sum():.2f} kWh, total elec: {df['elec_kwh'].sum():.2f} kWh")
 
@@ -787,86 +731,6 @@ class HeatPumpDataQuery:
             logger.error(f"Error calculating COP from pivot: {e}", exc_info=True)
             return pd.DataFrame()
 
-    def calculate_cop_from_df(self, df: pd.DataFrame, interval_minutes: int = 15) -> pd.DataFrame:
-        """
-        Calculate Interval COP from unpivoted dataframe (pivots first, then calculates)
-
-        Args:
-            df: DataFrame with 'name' column containing metric names and '_value' column
-            interval_minutes: Aggregation interval (default 15 min)
-
-        Returns:
-            DataFrame with interval COP and cumulative COP
-        """
-        try:
-            if df.empty:
-                return pd.DataFrame()
-
-            # Filter to only COP-related metrics
-            cop_metrics = [
-                'radiator_forward',
-                'radiator_return',
-                'heat_carrier_forward',  # IVT alternative
-                'heat_carrier_return',   # IVT alternative
-                'brine_in_evaporator',
-                'brine_out_condenser',
-                'power_consumption',
-                'compressor_status'
-            ]
-
-            df_filtered = df[df['name'].isin(cop_metrics)].copy()
-
-            if df_filtered.empty:
-                return pd.DataFrame()
-
-            # Pivot to get each metric as a column
-            df_pivot = df_filtered.pivot_table(
-                index='_time',
-                columns='name',
-                values='_value',
-                aggfunc='mean'
-            ).reset_index()
-
-            # Delegate to the pivoted version
-            return self.calculate_cop_from_pivot(df_pivot, interval_minutes)
-
-        except Exception as e:
-            logger.error(f"Error calculating COP from dataframe: {e}")
-            return pd.DataFrame()
-
-    def calculate_cop(self, time_range: str = '24h') -> pd.DataFrame:
-        """
-        Calculate COP (Coefficient of Performance) over time
-
-        Uses optimized aggregation for smooth COP visualization
-        Finer granularity than batch query for better chart quality
-
-        COP = Heat Output / Electrical Input
-        Simplified calculation using temperature deltas
-        """
-        try:
-            metrics = [
-                'radiator_forward',
-                'radiator_return',
-                'heat_carrier_forward',  # IVT alternative
-                'heat_carrier_return',   # IVT alternative
-                'brine_in_evaporator',
-                'brine_out_condenser',
-                'power_consumption',
-                'compressor_status'
-            ]
-
-            # Use finer aggregation for COP visualization (smoother charts)
-            # 7d: 10m instead of 30m, 30d: 30m instead of 2h
-            cop_aggregation = self._get_cop_aggregation_window(time_range)
-            df = self.query_metrics(metrics, time_range, aggregation_window=cop_aggregation)
-
-            # Use the optimized method
-            return self.calculate_cop_from_df(df)
-
-        except Exception as e:
-            logger.error(f"Error calculating COP: {e}")
-            return pd.DataFrame()
 
     def _get_cop_aggregation_window(self, time_range: str) -> str:
         """
@@ -1195,427 +1059,3 @@ class HeatPumpDataQuery:
                 'cycles_per_day': 0
             }
 
-    def analyze_hot_water_cycles(self, time_range: str = '7d') -> Dict[str, Any]:
-        """
-        Analyze hot water heating cycles
-
-        DEPRECATED: Use analyze_hot_water_cycles_from_df() with pre-fetched data for better performance
-        KORRIGERAD: Använder nu korrekt effekt under varmvattencykler
-        """
-        try:
-            metrics = ['switch_valve_status', 'hot_water_top', 'power_consumption']
-
-            # Använd finare aggregering för varmvattenanalys
-            df = self.query_metrics(metrics, time_range, aggregation_window='1m')
-            
-            if df.empty:
-                return {
-                    'total_cycles': 0,
-                    'avg_cycle_duration_minutes': 0,
-                    'avg_energy_per_cycle_kwh': 0,
-                    'cycles_per_day': 0
-                }
-            
-            valve_df = df[df['name'] == 'switch_valve_status'].copy()
-            power_df = df[df['name'] == 'power_consumption'].copy()
-            
-            if valve_df.empty:
-                return {
-                    'total_cycles': 0,
-                    'avg_cycle_duration_minutes': 0,
-                    'avg_energy_per_cycle_kwh': 0,
-                    'cycles_per_day': 0
-                }
-            
-            valve_df = valve_df.sort_values('_time')
-            power_df = power_df.sort_values('_time')
-            
-            # Detect cycles (transitions from 0 to 1)
-            valve_df['prev_value'] = valve_df['_value'].shift(1)
-            cycles_start = valve_df[(valve_df['_value'] == 1) & (valve_df['prev_value'] == 0)]
-            
-            num_cycles = len(cycles_start)
-            
-            logger.info(f"Hot water cycle detection for {time_range}:")
-            logger.info(f"  Detected {num_cycles} valve transitions (0→1)")
-            
-            if num_cycles == 0:
-                logger.info("  No valve transitions detected - växelventilen har inte slagit över till varmvatten")
-                return {
-                    'total_cycles': 0,
-                    'avg_cycle_duration_minutes': 0,
-                    'avg_energy_per_cycle_kwh': 0,
-                    'cycles_per_day': 0
-                }
-            
-            # Calculate average cycle duration AND energy
-            cycle_durations = []
-            cycle_energies = []
-
-            # MINIMUM DURATION FILTER - configurable in config.yaml
-            min_cycle_minutes = self.hw_min_cycle_minutes
-
-            filtered_count = 0
-
-            for start_time in cycles_start['_time']:
-                after_start = valve_df[valve_df['_time'] > start_time]
-                end_times = after_start[after_start['_value'] == 0]
-
-                if not end_times.empty:
-                    end_time = end_times.iloc[0]['_time']
-                    duration_seconds = (end_time - start_time).total_seconds()
-                    duration_minutes = duration_seconds / 60
-
-                    # FILTER: Skippa cykler kortare än minimum
-                    if duration_minutes < min_cycle_minutes:
-                        filtered_count += 1
-                        logger.debug(f"  ❌ FILTRERAD kort cykel kl {start_time.strftime('%H:%M:%S')}: {duration_minutes:.1f} min (< {min_cycle_minutes} min)")
-                        continue
-                    
-                    cycle_durations.append(duration_minutes)
-                    
-                    # KORRIGERING: Beräkna energi för DENNA specifika cykel
-                    # Hämta effektdata under denna cykel
-                    cycle_power = power_df[
-                        (power_df['_time'] >= start_time) & 
-                        (power_df['_time'] <= end_time)
-                    ].copy()
-                    
-                    if not cycle_power.empty:
-                        # Beräkna energi genom att integrera effekt över tid
-                        cycle_power = cycle_power.sort_values('_time')
-                        cycle_power['time_diff_hours'] = cycle_power['_time'].diff().dt.total_seconds() / 3600
-                        cycle_power['time_diff_hours'] = cycle_power['time_diff_hours'].fillna(0)
-                        
-                        # Energy = Power (W) * Time (h) / 1000 = kWh
-                        cycle_power['energy_kwh'] = (cycle_power['_value'] * cycle_power['time_diff_hours']) / 1000
-                        
-                        total_cycle_energy = cycle_power['energy_kwh'].sum()
-                        cycle_energies.append(total_cycle_energy)
-
-                        logger.debug(f"  ✅ GILTIG cykel kl {start_time.strftime('%H:%M:%S')}: {duration_minutes:.1f} min, {total_cycle_energy:.2f} kWh")
-            
-            # Antal giltiga cykler (efter filtrering)
-            num_valid_cycles = len(cycle_durations)
-            
-            logger.info(f"  Totalt: {num_valid_cycles} giltiga cykler, {filtered_count} filtrerade (<{min_cycle_minutes} min)")
-
-            if num_valid_cycles == 0:
-                logger.warning(f"⚠️  Inga giltiga varmvattencykler hittades - alla {filtered_count} cykler var < {min_cycle_minutes} min!")
-                logger.warning("   → Kontrollera växelventilsgrafen för att se vad som händer")
-                return {
-                    'total_cycles': 0,
-                    'avg_cycle_duration_minutes': 0,
-                    'avg_energy_per_cycle_kwh': 0,
-                    'cycles_per_day': 0
-                }
-            
-            avg_duration = np.mean(cycle_durations) if cycle_durations else 0
-            avg_energy_kwh = np.mean(cycle_energies) if cycle_energies else 0
-            
-            # Calculate cycles per day - ANVÄNDER VERKLIG TID
-            total_days = (valve_df['_time'].max() - valve_df['_time'].min()).total_seconds() / 86400
-            cycles_per_day = num_valid_cycles / total_days if total_days > 0 else 0
-            
-            logger.info(f"Hot water analysis for {time_range}:")
-            logger.info(f"  Total cycles: {num_valid_cycles} (filtered, min {min_cycle_minutes} min)")
-            logger.info(f"  Avg duration: {avg_duration:.1f} min")
-            logger.info(f"  Avg energy: {avg_energy_kwh:.2f} kWh")
-            logger.info(f"  Cycles/day: {cycles_per_day:.1f}")
-            
-            return {
-                'total_cycles': num_valid_cycles,
-                'avg_cycle_duration_minutes': round(avg_duration, 1),
-                'avg_energy_per_cycle_kwh': round(avg_energy_kwh, 2),
-                'cycles_per_day': round(cycles_per_day, 1)
-            }
-            
-        except Exception as e:
-            logger.error(f"Error analyzing hot water cycles: {e}")
-            return {
-                'total_cycles': 0,
-                'avg_cycle_duration_minutes': 0,
-                'avg_energy_per_cycle_kwh': 0,
-                'cycles_per_day': 0
-            }
-    
-    def get_alarm_status(self) -> Dict[str, Any]:
-        """Get current alarm status with description (brand-aware)"""
-        try:
-            latest = self.get_latest_values()
-
-            alarm_status = latest.get('alarm_status', {}).get('value', 0)
-            alarm_code = int(latest.get('alarm_code', {}).get('value', 0))
-
-            is_alarm = alarm_status > 0 or alarm_code > 0
-
-            # Use brand-specific alarm codes
-            alarm_description = self.alarm_codes.get(alarm_code, f"Okänd larmkod: {alarm_code}")
-            
-            # Hämta när larmet aktiverades
-            if is_alarm:
-                query = f'''
-                    from(bucket: "{self.bucket}")
-                        |> range(start: -7d)
-                        |> filter(fn: (r) => r._measurement == "heatpump")
-                        |> filter(fn: (r) => r.name == "alarm_code")
-                        |> filter(fn: (r) => r._value > 0)
-                        |> last()
-                '''
-                
-                result = self.query_api.query_data_frame(query)
-                
-                if isinstance(result, list):
-                    result = pd.concat(result, ignore_index=True)
-                
-                if not result.empty:
-                    alarm_time = result.iloc[0]['_time']
-                else:
-                    alarm_time = None
-            else:
-                alarm_time = None
-            
-            return {
-                'is_alarm': is_alarm,
-                'alarm_code': alarm_code,
-                'alarm_description': alarm_description,
-                'alarm_time': alarm_time,
-                'alarm_status_raw': alarm_status
-            }
-            
-        except Exception as e:
-            logger.error(f"Error getting alarm status: {e}")
-            return {
-                'is_alarm': False,
-                'alarm_code': 0,
-                'alarm_description': 'Inget larm',
-                'alarm_time': None,
-                'alarm_status_raw': 0
-            }
-    
-    def get_event_log(self, limit: int = 10) -> List[Dict[str, Any]]:
-        """
-        Get recent events (state changes) from the heat pump
-        
-        Events tracked:
-        - Compressor ON/OFF
-        - Brine pump ON/OFF
-        - Radiator pump ON/OFF
-        - Additional heater ON/OFF
-        - Hot water cycle start/stop
-        - Alarms
-        """
-        try:
-            events = []
-            
-            # Hämta state changes för de senaste 24 timmarna
-            metrics = [
-                'compressor_status',
-                'brine_pump_status',
-                'radiator_pump_status',
-                'switch_valve_status',
-                'additional_heat_percent',
-                'alarm_code',
-                'alarm_status'
-            ]
-            
-            logger.info(f"Fetching event log for {len(metrics)} metrics...")
-            
-            for metric in metrics:
-                # Aggregera till 1-minuters intervall
-                query = f'''
-                    from(bucket: "{self.bucket}")
-                        |> range(start: -24h)
-                        |> filter(fn: (r) => r._measurement == "heatpump")
-                        |> filter(fn: (r) => r.name == "{metric}")
-                        |> aggregateWindow(every: 1m, fn: mean, createEmpty: false)
-                        |> yield(name: "mean")
-                '''
-                
-                logger.debug(f"Querying metric: {metric}")
-                result = self.query_api.query_data_frame(query)
-                
-                if isinstance(result, list):
-                    result = pd.concat(result, ignore_index=True)
-                
-                if result.empty:
-                    logger.debug(f"No data for {metric}")
-                    continue
-                
-                logger.info(f"Got {len(result)} rows for {metric}")
-                
-                result = result.sort_values('_time')
-                
-                # Detektera state changes
-                result['prev_value'] = result['_value'].shift(1)
-                
-                # Räkna antal changes
-                changes_detected = 0
-                
-                for idx, row in result.iterrows():
-                    if pd.isna(row['prev_value']):
-                        continue
-                    
-                    current = row['_value']
-                    previous = row['prev_value']
-                    timestamp = row['_time']
-                    
-                    # Kompressor
-                    if metric == 'compressor_status':
-                        if current > 0 and previous == 0:
-                            events.append({
-                                'time': timestamp,
-                                'event': 'Kompressor PÅ',
-                                'type': 'info',
-                                'icon': '🔄'
-                            })
-                            changes_detected += 1
-                        elif current == 0 and previous > 0:
-                            events.append({
-                                'time': timestamp,
-                                'event': 'Kompressor AV',
-                                'type': 'info',
-                                'icon': '⏸️'
-                            })
-                            changes_detected += 1
-                    
-                    # Köldbärarpump
-                    elif metric == 'brine_pump_status':
-                        if current > 0 and previous == 0:
-                            events.append({
-                                'time': timestamp,
-                                'event': 'Köldbärarpump PÅ',
-                                'type': 'info',
-                                'icon': '💧'
-                            })
-                            changes_detected += 1
-                        elif current == 0 and previous > 0:
-                            events.append({
-                                'time': timestamp,
-                                'event': 'Köldbärarpump AV',
-                                'type': 'info',
-                                'icon': '💧'
-                            })
-                            changes_detected += 1
-                    
-                    # Radiatorpump
-                    elif metric == 'radiator_pump_status':
-                        if current > 0 and previous == 0:
-                            events.append({
-                                'time': timestamp,
-                                'event': 'Radiatorpump PÅ',
-                                'type': 'info',
-                                'icon': '📡'
-                            })
-                            changes_detected += 1
-                        elif current == 0 and previous > 0:
-                            events.append({
-                                'time': timestamp,
-                                'event': 'Radiatorpump AV',
-                                'type': 'info',
-                                'icon': '📡'
-                            })
-                            changes_detected += 1
-                    
-                    # Varmvattencykel
-                    elif metric == 'switch_valve_status':
-                        if current == 1 and previous == 0:
-                            events.append({
-                                'time': timestamp,
-                                'event': 'Varmvattencykel START',
-                                'type': 'info',
-                                'icon': '🚿'
-                            })
-                            changes_detected += 1
-                        elif current == 0 and previous == 1:
-                            events.append({
-                                'time': timestamp,
-                                'event': 'Varmvattencykel STOPP',
-                                'type': 'info',
-                                'icon': '🚿'
-                            })
-                            changes_detected += 1
-                    
-                    # Tillsattsvärme
-                    elif metric == 'additional_heat_percent':
-                        if current > 0 and previous == 0:
-                            events.append({
-                                'time': timestamp,
-                                'event': f'Tillsattsvärme PÅ ({int(current)}%)',
-                                'type': 'warning',
-                                'icon': '🔥'
-                            })
-                            changes_detected += 1
-                        elif current == 0 and previous > 0:
-                            events.append({
-                                'time': timestamp,
-                                'event': 'Tillsattsvärme AV',
-                                'type': 'info',
-                                'icon': '🔥'
-                            })
-                            changes_detected += 1
-                        elif current > 0 and previous > 0 and abs(current - previous) > 10:
-                            events.append({
-                                'time': timestamp,
-                                'event': f'Tillsattsvärme ändrad till {int(current)}%',
-                                'type': 'warning',
-                                'icon': '🔥'
-                            })
-                            changes_detected += 1
-                    
-                    # Larm (brand-aware)
-                    elif metric == 'alarm_code':
-                        if current > 0 and previous == 0:
-                            alarm_desc = self.alarm_codes.get(int(current), f"Kod {int(current)}")
-                            events.append({
-                                'time': timestamp,
-                                'event': f'LARM - {alarm_desc}',
-                                'type': 'danger',
-                                'icon': '⚠️'
-                            })
-                            changes_detected += 1
-                        elif current == 0 and previous > 0:
-                            events.append({
-                                'time': timestamp,
-                                'event': 'Larm återställt',
-                                'type': 'success',
-                                'icon': '✅'
-                            })
-                            changes_detected += 1
-
-                    # Larmstatus (IVT uses alarm_status to signal active alarms)
-                    elif metric == 'alarm_status':
-                        if current > 0 and previous == 0:
-                            events.append({
-                                'time': timestamp,
-                                'event': 'Larm aktiverat',
-                                'type': 'danger',
-                                'icon': '⚠️'
-                            })
-                            changes_detected += 1
-                        elif current == 0 and previous > 0:
-                            events.append({
-                                'time': timestamp,
-                                'event': 'Larm återställt',
-                                'type': 'success',
-                                'icon': '✅'
-                            })
-                            changes_detected += 1
-
-                logger.info(f"Detected {changes_detected} changes for {metric}")
-            
-            logger.info(f"Total events before sorting: {len(events)}")
-            
-            # Sortera efter tid (senaste först)
-            events = sorted(events, key=lambda x: x['time'], reverse=True)
-            
-            # Begränsa till antal
-            events = events[:limit]
-            
-            logger.info(f"Returning {len(events)} events after limit")
-            
-            return events
-            
-        except Exception as e:
-            logger.error(f"Error getting event log: {e}")
-            return []

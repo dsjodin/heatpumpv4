@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Schemaeditor</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}">
+</head>
+<body class="sed-body">
+    <div class="sed-toolbar">
+        <a href="/" class="btn btn-sm btn-outline-secondary">&larr; Dashboard</a>
+
+        <label class="sed-group">Märke
+            <select id="sed-brand" class="form-select form-select-sm">
+                {% for b in brands %}<option value="{{ b }}" {% if b == brand %}selected{% endif %}>{{ b }}</option>{% endfor %}
+            </select>
+        </label>
+
+        <span class="sed-group">
+            <select id="sed-copy-from" class="form-select form-select-sm">
+                {% for b in brands %}<option value="{{ b }}">{{ b }}</option>{% endfor %}
+            </select>
+            <button id="sed-copy" class="btn btn-sm btn-outline-secondary">Kopiera från</button>
+        </span>
+
+        <span class="sed-group">
+            <select id="sed-add-type" class="form-select form-select-sm"></select>
+            <button id="sed-add" class="btn btn-sm btn-outline-primary">+ Komponent</button>
+            <button id="sed-add-pipe" class="btn btn-sm btn-outline-primary">+ Rör</button>
+        </span>
+
+        <span class="sed-group">
+            <button id="sed-duplicate" class="btn btn-sm btn-outline-secondary" title="Ctrl+D">Duplicera</button>
+            <button id="sed-delete" class="btn btn-sm btn-outline-danger" title="Delete">Ta bort</button>
+            <button id="sed-undo" class="btn btn-sm btn-outline-secondary" title="Ctrl+Z">Ångra</button>
+        </span>
+
+        <label class="sed-group"><input type="checkbox" id="sed-show-active"> Visa allt aktivt</label>
+
+        <span class="sed-group ms-auto">
+            <button id="sed-save" class="btn btn-sm btn-success">Spara</button>
+            <button id="sed-download" class="btn btn-sm btn-outline-secondary">Ladda ner</button>
+            <button id="sed-copy-yaml" class="btn btn-sm btn-outline-secondary">Kopiera YAML</button>
+        </span>
+    </div>
+
+    <div id="sed-status" class="sed-status"></div>
+
+    <div class="sed-main">
+        <div class="sed-canvas">
+            <svg id="sed-svg" class="schema-svg sed-svg"></svg>
+            <p class="sed-hint">Klicka för att välja, dra för att flytta (Shift = utan snäpp). Piltangenter flyttar 1 px (Shift 10 px).
+                Dra den lilla fyrkanten för att ändra storlek (Shift = behåll proportioner). Valt rör visar handtag för varje punkt.</p>
+        </div>
+        <div class="sed-panel">
+            <h6 id="sed-panel-title">Inget valt</h6>
+            <div id="sed-props"></div>
+            <details class="mt-3">
+                <summary>Layout</summary>
+                <label class="sed-field">Rörbredd (standard 14) <input type="number" id="sed-pipe-width" class="form-control form-control-sm" placeholder="14"></label>
+                <label class="sed-field">Bredd <input type="number" id="sed-vb-w" class="form-control form-control-sm"></label>
+                <label class="sed-field">Höjd <input type="number" id="sed-vb-h" class="form-control form-control-sm"></label>
+            </details>
+            <details class="mt-3" id="sed-yaml-box">
+                <summary>YAML</summary>
+                <textarea id="sed-yaml" class="form-control form-control-sm sed-yaml" readonly></textarea>
+            </details>
+        </div>
+    </div>
+
+    <datalist id="sed-registers"></datalist>
+
+    <script src="{{ url_for('static', filename='js/schema.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/schema-editor.js') }}"></script>
+</body>
+</html>

@@ -8,10 +8,13 @@ To add a new brand:
 3. The class must inherit from HeatPumpProvider and implement all abstract methods
 4. Create registers.py with register definitions
 5. Create alarms.py with alarm code definitions
-6. The factory will auto-discover your provider - no code changes needed elsewhere!
+6. Optionally create schema.yaml describing the live system schema
+7. The factory will auto-discover your provider - no code changes needed elsewhere!
 """
 
+import inspect
 from abc import ABC, abstractmethod
+from pathlib import Path
 from typing import Dict, Any, List, Optional
 
 
@@ -398,6 +401,19 @@ class HeatPumpProvider(ABC):
             Alarm description string
         """
         return self.alarm_codes.get(code, f"Unknown alarm: {code}")
+
+    def get_schema_path(self) -> Path:
+        """Path to schema.yaml next to the provider module"""
+        return Path(inspect.getfile(type(self))).parent / 'schema.yaml'
+
+    def get_schema_layout(self) -> Optional[Dict[str, Any]]:
+        """Return the live schema layout from schema.yaml next to the provider, or None."""
+        import yaml
+        path = self.get_schema_path()
+        if not path.exists():
+            return None
+        with open(path, 'r', encoding='utf-8') as f:
+            return yaml.safe_load(f)
 
     def get_status_field_names(self) -> List[str]:
         """

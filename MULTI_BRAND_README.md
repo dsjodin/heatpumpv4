@@ -22,20 +22,17 @@ providers/
 │   ├── provider.py           # Thermia-specific implementation
 │   ├── registers.py          # Thermia register definitions
 │   ├── alarms.py             # Thermia alarm codes
-│   ├── dashboard_components.py  # Thermia UI components
-│   └── callbacks.py          # Thermia callback functions
+│   └── schema.yaml           # Thermia live system schema
 ├── ivt/
 │   ├── provider.py           # IVT-specific implementation
 │   ├── registers.py          # IVT register definitions (Rego 600/637)
 │   ├── alarms.py             # IVT alarm codes
-│   ├── dashboard_components.py  # IVT UI components
-│   └── callbacks.py          # IVT callback functions
+│   └── schema.yaml           # IVT live system schema
 └── nibe/
     ├── provider.py           # NIBE-specific implementation
     ├── registers.py          # NIBE register definitions (F/S-series)
     ├── alarms.py             # NIBE alarm codes
-    ├── dashboard_components.py  # NIBE UI components
-    └── callbacks.py          # NIBE callback functions
+    └── schema.yaml           # NIBE live system schema
 ```
 
 ### Hybrid Dashboard
@@ -52,7 +49,7 @@ Dashboarden använder en **hybrid approach**:
   - Sankey energiflöde
   - Systemschema
 
-- **Märkesspecifika komponenter** (med egna callbacks):
+- **Märkesspecifika komponenter**:
   - **Thermia**:
     - Pumpvarvtal (cirkulationspump, köldbärarpump)
     - Driftläge (Auto, Normal, etc.)
@@ -319,22 +316,65 @@ Varje register **måste** ha ett `type` fält för korrekt datahantering:
 | `setting` | Inställningar | Nej |
 | `current` | Ström (A) | Nej |
 
-### Dashboard components (optional)
+### Live systemschema (schema.yaml)
 
-Om du vill ha märkesspecifika UI-komponenter:
+Live-vyn ritas som SVG från `providers/<brand>/schema.yaml`. Inga bilder behövs:
+nytt märke eller annan pumpmodell = ny YAML-fil. Dashboarden monterar `providers/`,
+så ändringar syns direkt vid omladdning av sidan.
 
-```python
-# providers/bosch/dashboard_components.py
-def create_bosch_specific_section():
-    # Skapa UI-komponenter med unika ID:n (bosch-*)
-    ...
+#### Editor
 
-# providers/bosch/callbacks.py
-def register_bosch_callbacks(app, data_query):
-    @app.callback(Output('bosch-xxx', 'children'), ...)
-    def update_bosch_xxx(n):
-        ...
+Öppna `/schema-editor` (pennan i schema-kortet). Editorn använder samma renderare som
+live-vyn och visar live-värden från databasen.
+
+- Klicka för att välja, dra för att flytta (snäpper 5 px, Shift = fritt), piltangenter 1 px (Shift 10 px)
+- Valt rör visar handtag för varje punkt; punkter läggs till/tas bort i panelen
+- Vald komponent har en liten fyrkant för storlek (Shift = behåll proportioner); rörbredd i panelen eller under Layout
+- `Register`, `Aktiv när` och `Flöde när` föreslår registernamn och visar aktuellt värde/PÅ/AV
+- `Kopiera från` hämtar ett annat märkes layout som startpunkt
+- `Visa allt aktivt` tänder alla animationer
+- Ctrl+Z ångra, Ctrl+D duplicera, Delete ta bort, Esc avmarkera
+- `Spara` skriver `providers/<brand>/schema.yaml` (kräver att `providers/` är monterad
+  skrivbar, se `docker-compose.yml`), `Ladda ner` och `Kopiera YAML` ger filen utan att spara
+
+Filen skrivs om med en rad per rör/komponent, egna kommentarer i filen försvinner vid sparning.
+
+Lägg till `?grid=1` i URL:en för att få ett rutnät med koordinater (muspekarens
+position visas nere till höger) när du placerar delar.
+
+```yaml
+viewbox: [800, 450]
+pipes:
+  - { medium: hot, points: [[315, 262], [585, 250]], flow: radiator_pump_status }
+components:
+  - { type: pump, x: 400, y: 330, active: radiator_pump_status }
+  - { type: sensor, x: 510, y: 250, label: Framledning, value: radiator_forward, unit: "°C" }
 ```
+
+| Typ | Position | Fält |
+|-----|----------|------|
+| `cabinet` | x,y = övre vänstra hörnet, w,h | - |
+| `display` | x,y,w,h | `rows: [{label, value, unit, decimals}]` |
+| `heater` | x,y,w,h | `steps: [{label, active}]` |
+| `tank` | x,y,w,h | `label, value, unit, active` |
+| `radiator` | x,y,w,h | `active` |
+| `pump`, `compressor` | x,y = mitten, `r` | `active` |
+| `valve3` | x,y = mitten, `size` | `active` (pil uppåt = varmvatten, annars höger) |
+| `expansion` | x,y = mitten, `size` | - |
+| `sensor` | x,y = mitten, `w,h` | `label, value, unit, decimals` |
+| `label` | x,y, `size` (textstorlek) | `text` |
+
+Rör (`pipes`): `points` är en lista med koordinater i flödesriktningen, `medium` är
+`brine_in`, `brine_out`, `cold`, `hot` eller `return` (färger i `dashboard.css`, `--sch-*`),
+och `flow` styr den animerade flödeslinjen. Rörbredd sätts för alla rör med
+`pipe_width` på toppnivå (standard 14) eller per rör med `width`.
+
+`value` och nycklar i villkor är registernamn från `registers.py` (`name`-fältet).
+Villkor (`active`, `flow`) kan vara:
+
+- `compressor_status` - på när värdet > 0
+- `{ key: switch_valve_status, gt: 0 }` - även `lt`, `eq`, `ne`
+- `{ all: [villkor, ...] }` / `{ any: [villkor, ...] }`
 
 ## Körning
 

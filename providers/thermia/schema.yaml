@@ -1,0 +1,52 @@
+# Live system schema for Thermia Diplomat
+# Coordinates in a 800x450 canvas. Open the dashboard with ?grid=1 to see a grid.
+# Boxes (cabinet, display, heater, tank, radiator): x,y = top-left corner, w,h = size.
+# Points (pump, compressor, expansion, valve3, sensor): x,y = center.
+# Conditions: a metric name (on when > 0), or {key, gt|lt|eq|ne}, or {all: [...]}, {any: [...]}.
+viewbox: [800, 450]
+
+pipes:
+  # Brine (koldbarare)
+  - { medium: brine_in, points: [[0, 250], [180, 250], [180, 290]], flow: brine_pump_status }
+  - { medium: brine_out, points: [[180, 290], [180, 330], [0, 330]], flow: brine_pump_status }
+  # Refrigerant circuit inside the cabinet
+  - { medium: hot, points: [[282, 220], [315, 220], [315, 365], [275, 365]], flow: compressor_status }
+  - { medium: cold, points: [[245, 365], [205, 365], [205, 220], [238, 220]], flow: compressor_status }
+  # Heating circuit
+  - { medium: hot, points: [[315, 262], [345, 262], [345, 250], [585, 250]], flow: radiator_pump_status }
+  - { medium: hot, points: [[621, 250], [660, 250]], flow: { all: [radiator_pump_status, { key: switch_valve_status, eq: 0 }] } }
+  - { medium: return, points: [[660, 330], [345, 330], [345, 318], [315, 318]], flow: radiator_pump_status }
+  # Hot water branch and aux heater connection
+  - { medium: hot, points: [[603, 232], [603, 200]], flow: { key: switch_valve_status, gt: 0 } }
+  - { medium: hot, points: [[440, 195], [440, 250]] }
+
+components:
+  - { type: cabinet, x: 155, y: 5, w: 210, h: 430 }
+  - type: display
+    x: 180
+    y: 45
+    w: 160
+    h: 125
+    rows:
+      - { label: Utetemp, value: outdoor_temp, unit: "°C" }
+      - { label: Hetgas, value: pressure_tube_temp, unit: "°C" }
+      - { label: Integral, value: degree_minutes, decimals: 0 }
+  - { type: compressor, x: 260, y: 220, active: compressor_status }
+  - { type: expansion, x: 260, y: 365 }
+  - { type: pump, x: 25, y: 250, active: brine_pump_status }
+  - { type: pump, x: 400, y: 330, active: radiator_pump_status }
+  - type: heater
+    x: 410
+    y: 120
+    w: 80
+    h: 75
+    steps:
+      - { label: 3kW, active: { key: additional_heat_percent, gt: 0 } }
+      - { label: 6kW }
+  - { type: valve3, x: 603, y: 250, active: { key: switch_valve_status, gt: 0 } }
+  - { type: tank, x: 555, y: 65, w: 100, h: 135, label: Varmvatten, value: hot_water_top, unit: "°C", active: { key: switch_valve_status, gt: 0 } }
+  - { type: radiator, x: 660, y: 225, w: 135, h: 130, active: { any: [{ key: switch_valve_status, eq: 0 }, { key: radiator_forward, gt: 32 }] } }
+  - { type: sensor, x: 110, y: 250, label: KB In, value: brine_in_evaporator, unit: "°C" }
+  - { type: sensor, x: 110, y: 330, label: KB Ut, value: brine_out_condenser, unit: "°C" }
+  - { type: sensor, x: 510, y: 250, label: Framledning, value: radiator_forward, unit: "°C" }
+  - { type: sensor, x: 510, y: 330, label: Radiator retur, value: radiator_return, unit: "°C" }

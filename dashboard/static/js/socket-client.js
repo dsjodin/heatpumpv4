@@ -94,8 +94,10 @@ function updateAllUI(data) {
     // Update Monitor view panels
     updateMonitorPanels(data);
 
-    // Update schema overlays
-    updateSchemaTemps(data);
+    // Update live schema
+    if (window.updateSchema && data.status) {
+        window.updateSchema(data.status.latest);
+    }
 
     // Update event log
     if (data.events) {
@@ -312,100 +314,6 @@ function updateMonitorPanels(data) {
     }
 }
 
-// ==================== Schema Overlay Updates ====================
-
-function updateSchemaTemps(data) {
-    if (!data.status || !data.status.current) return;
-    const current = data.status.current;
-
-    const schemaContainer = document.getElementById('schema-container');
-    const brand = schemaContainer ? schemaContainer.dataset.brand : 'thermia';
-
-    function setOverlayActive(elementId, isActive) {
-        const element = document.getElementById(elementId);
-        if (element) {
-            element.classList.toggle('active', isActive);
-        }
-    }
-
-    // Temperature text displays
-    const textOutdoor = document.getElementById('text-outdoor_temp');
-    if (textOutdoor && current.outdoor_temp && current.outdoor_temp.current !== null) {
-        textOutdoor.textContent = `${current.outdoor_temp.current.toFixed(1)}°C`;
-    }
-
-    const textHotgas = document.getElementById('text-hotgas_temp');
-    if (textHotgas) {
-        if (current.hotgas_temp !== undefined && current.hotgas_temp !== null) {
-            textHotgas.textContent = `${current.hotgas_temp.toFixed(1)}°C`;
-        } else if (current.pressure_tube_temp !== undefined && current.pressure_tube_temp !== null) {
-            textHotgas.textContent = `${current.pressure_tube_temp.toFixed(1)}°C`;
-        }
-    }
-
-    const textIntegral = document.getElementById('text-integral_value');
-    if (textIntegral) {
-        if (current.integral_value !== undefined && current.integral_value !== null) {
-            textIntegral.textContent = current.integral_value.toFixed(0);
-        } else if (current.degree_minutes !== undefined && current.degree_minutes !== null) {
-            textIntegral.textContent = current.degree_minutes.toFixed(0);
-        }
-    }
-
-    const textKBIn = document.getElementById('text-KB_in_temp');
-    if (textKBIn && current.brine_in && current.brine_in.current !== null) {
-        textKBIn.textContent = `${current.brine_in.current.toFixed(1)}°C`;
-    }
-
-    const textKBOut = document.getElementById('text-KB_out_temp');
-    if (textKBOut && current.brine_out && current.brine_out.current !== null) {
-        textKBOut.textContent = `${current.brine_out.current.toFixed(1)}°C`;
-    }
-
-    const textHotwater = document.getElementById('text-hotwater_temp');
-    if (textHotwater && current.hot_water && current.hot_water.current !== null) {
-        textHotwater.textContent = `${current.hot_water.current.toFixed(1)}°C`;
-    }
-
-    const textRadForward = document.getElementById('text-radiator_forward_temp');
-    if (textRadForward && current.radiator_forward && current.radiator_forward.current !== null) {
-        textRadForward.textContent = `${current.radiator_forward.current.toFixed(1)}°C`;
-    }
-
-    const textRadReturn = document.getElementById('text-radiator_return_temp');
-    if (textRadReturn && current.radiator_return && current.radiator_return.current !== null) {
-        textRadReturn.textContent = `${current.radiator_return.current.toFixed(1)}°C`;
-    }
-
-    // Overlay animations
-    setOverlayActive('overlay-BV_komp_anim', current.compressor_running === true);
-    setOverlayActive('overlay-3kw_on', current.aux_heater === true);
-    setOverlayActive('overlay-KB_snurr', current.brine_pump_running === true);
-    setOverlayActive('overlay-RAD_snurr', current.radiator_pump_running === true);
-    setOverlayActive('overlay-RAD_pil', current.switch_valve_status === 0);
-
-    const showVVPil = current.switch_valve_status !== undefined &&
-                      current.switch_valve_status !== null &&
-                      current.switch_valve_status > 0;
-    setOverlayActive('overlay-VV_pil', showVVPil);
-
-    const showRadHot = current.switch_valve_status === 0 ||
-                       (current.radiator_forward &&
-                        current.radiator_forward.current !== null &&
-                        current.radiator_forward.current > 32);
-    setOverlayActive('overlay-RAD_hot', showRadHot);
-
-    const showVVHot = current.switch_valve_status !== undefined &&
-                      current.switch_valve_status !== null &&
-                      current.switch_valve_status > 0;
-    setOverlayActive('overlay-VV_hot', showVVHot);
-
-    if (brand === 'ivt') {
-        // VB-snurr (VVB pump) uses pump_heat_circuit status
-        setOverlayActive('overlay-VB_snurr', current.vvb_pump_running === true);
-    }
-}
-
 // ==================== Event Log ====================
 
 function updateEventLog(events) {
@@ -619,15 +527,20 @@ async function saveSettings() {
         if (result.success) {
             let msg = '<i class="fas fa-check me-2"></i>Inställningar sparade!';
 
-            if (result.needs_restart && result.needs_restart.length > 0) {
-                const services = result.needs_restart.join(', ');
-                msg += `<br><br>Ändringar kräver omstart av: <strong>${services}</strong>`;
-                msg += `<br><button class="btn btn-warning btn-sm mt-2" onclick="restartServices(${JSON.stringify(result.needs_restart)})">`;
-                msg += '<i class="fas fa-sync-alt me-1"></i>Starta om nu</button>';
+            const needsRestart = result.needs_restart || [];
+            if (needsRestart.length > 0) {
+                msg += `<br><br>Ändringar kräver omstart av: <strong>${needsRestart.join(', ')}</strong><br>`;
             }
 
             alertEl.className = 'alert alert-success';
             alertEl.innerHTML = msg;
+            if (needsRestart.length > 0) {
+                const restartBtn = document.createElement('button');
+                restartBtn.className = 'btn btn-warning btn-sm mt-2';
+                restartBtn.innerHTML = '<i class="fas fa-sync-alt me-1"></i>Starta om nu';
+                restartBtn.addEventListener('click', () => restartServices(needsRestart));
+                alertEl.appendChild(restartBtn);
+            }
             alertEl.classList.remove('d-none');
 
             // Reload settings to reflect actual state

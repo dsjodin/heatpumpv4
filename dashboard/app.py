@@ -7,6 +7,7 @@ Supports: Thermia, IVT, NIBE
 
 import os
 import sys
+import copy
 import time
 import logging
 import yaml
@@ -22,14 +23,13 @@ BUILD_TIME = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 from influxdb_client.domain.bucket_retention_rules import BucketRetentionRules
 from flask import Flask, render_template, jsonify, request
 from flask_socketio import SocketIO, emit
-from flask_cors import CORS
 import eventlet
 
 # Add parent directory to path for provider imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from providers import get_provider
-from data_query import HeatPumpDataQuery
+from providers import get_provider, get_supported_brands
+from data_query import HeatPumpDataQuery, load_config, CONFIG_PATH
 from config_colors import THERMIA_COLORS
 
 # Setup logging
@@ -41,13 +41,16 @@ logger = logging.getLogger(__name__)
 
 # Initialize Flask app
 app = Flask(__name__)
+app.json.sort_keys = False  # keep schema.yaml key order in /api/schema
 app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'heatpump-dashboard-secret-key')
-CORS(app)
+
+# Same-origin only unless CORS_ORIGINS is set (comma separated)
+cors_origins = [o.strip() for o in os.getenv('CORS_ORIGINS', '').split(',') if o.strip()] or None
 
 # Initialize Socket.IO
 socketio = SocketIO(
     app,
-    cors_allowed_origins="*",
+    cors_allowed_origins=cors_origins,
     async_mode='eventlet',
     ping_timeout=60,
     ping_interval=25
@@ -56,15 +59,8 @@ socketio = SocketIO(
 # Load provider from config
 def load_provider():
     """Load heat pump provider from config"""
-    config_path = '/app/config.yaml'
     try:
-        if os.path.exists(config_path):
-            with open(config_path, 'r') as f:
-                config = yaml.safe_load(f)
-            brand = config.get('brand', 'thermia')
-        else:
-            brand = os.getenv('HEATPUMP_BRAND', 'thermia')
-
+        brand = load_config().get('brand') or os.getenv('HEATPUMP_BRAND', 'thermia')
         provider = get_provider(brand)
         logger.info(f"✅ Loaded provider: {provider.get_display_name()}")
         return provider
@@ -81,6 +77,16 @@ data_query = HeatPumpDataQuery()
 # Store connected clients and their time ranges
 connected_clients = {}
 
+DEFAULT_TIME_RANGES = ['1h', '6h', '24h', '7d', '30d', '90d']
+
+
+def validate_time_range(value):
+    """Only allow configured time ranges (value is interpolated into Flux)"""
+    allowed = load_config().get('dashboard', {}).get('time_ranges') or DEFAULT_TIME_RANGES
+    if value not in allowed:
+        raise ValueError(f'Ogiltigt tidsintervall: {value!r}')
+    return value
+
 
 # ==================== HTTP Routes ====================
 
@@ -90,7 +96,8 @@ def index():
     return render_template('dashboard.html',
                          brand=provider.get_brand_name(),
                          brand_name=provider.get_display_name(),
-                         dashboard_title=provider.get_dashboard_title())
+                         dashboard_title=provider.get_dashboard_title(),
+                         schema=provider.get_schema_layout())
 
 def clean_nan_values(obj):
     """
@@ -185,11 +192,8 @@ def set_bucket_retention(days):
 
 def apply_retention_from_config():
     """Apply retention policy from config at startup"""
-    config_path = '/app/config.yaml'
     try:
-        with open(config_path, 'r') as f:
-            config = yaml.safe_load(f)
-        days = config.get('retention', {}).get('days', 90)
+        days = load_config().get('retention', {}).get('days', 90)
         if days > 0:
             set_bucket_retention(days)
             logger.info(f"✅ Applied retention policy: {days} days")
@@ -204,12 +208,7 @@ apply_retention_from_config()
 @app.route('/api/settings')
 def get_settings():
     """Get all editable settings + system info"""
-    config_path = '/app/config.yaml'
-    try:
-        with open(config_path, 'r') as f:
-            config = yaml.safe_load(f)
-    except Exception:
-        config = {}
+    config = load_config()
 
     # Get InfluxDB health
     try:
@@ -261,58 +260,74 @@ def get_settings():
 @app.route('/api/settings', methods=['POST'])
 def save_settings():
     """Save settings to config.yaml and apply retention"""
-    config_path = '/app/config.yaml'
-    data = request.json
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({'success': False, 'message': 'Ogiltig JSON'}), 400
 
-    try:
-        with open(config_path, 'r') as f:
-            config = yaml.safe_load(f) or {}
-    except Exception:
-        config = {}
-
+    config = copy.deepcopy(load_config())
     needs_restart = []
+    errors = []
 
-    # Update values with validation
-    if 'brand' in data and data['brand'] in ('thermia', 'ivt', 'nibe'):
-        if data['brand'] != config.get('brand'):
-            needs_restart.append('brand')
-        config['brand'] = data['brand']
+    def number(key, cast, lo, hi, label):
+        try:
+            val = cast(data[key])
+        except (TypeError, ValueError):
+            errors.append(f'{label}: måste vara ett tal')
+            return None
+        if not lo <= val <= hi:
+            errors.append(f'{label}: måste vara mellan {lo} och {hi}')
+            return None
+        return val
+
+    if 'brand' in data:
+        if data['brand'] not in ('thermia', 'ivt', 'nibe'):
+            errors.append(f"Märke: okänt värde {data['brand']!r}")
+        else:
+            if data['brand'] != config.get('brand'):
+                needs_restart += ['collector', 'dashboard']
+            config['brand'] = data['brand']
 
     if 'cop_flow_factor' in data:
-        val = float(data['cop_flow_factor'])
-        if 1.0 <= val <= 5.0:
+        val = number('cop_flow_factor', float, 1.0, 5.0, 'Flödesfaktor')
+        if val is not None:
             config.setdefault('cop', {})['flow_factor'] = round(val, 2)
 
     if 'hw_min_cycle_minutes' in data:
-        val = int(data['hw_min_cycle_minutes'])
-        if 0 <= val <= 60:
+        val = number('hw_min_cycle_minutes', int, 0, 60, 'Min cykeltid')
+        if val is not None:
             config.setdefault('hot_water', {})['min_cycle_minutes'] = val
 
     if 'collection_interval' in data:
-        val = int(data['collection_interval'])
-        if 5 <= val <= 300:
-            if val != config.get('collection', {}).get('interval_seconds'):
+        val = number('collection_interval', int, 5, 300, 'Insamlingsintervall')
+        if val is not None:
+            if val != config.get('collection', {}).get('interval_seconds') and 'collector' not in needs_restart:
                 needs_restart.append('collector')
             config.setdefault('collection', {})['interval_seconds'] = val
 
     if 'dashboard_refresh_interval' in data:
-        val = int(data['dashboard_refresh_interval'])
-        if 5 <= val <= 300:
+        val = number('dashboard_refresh_interval', int, 5, 300, 'Uppdateringsintervall')
+        if val is not None:
             config.setdefault('dashboard', {})['refresh_interval'] = val
 
     if 'electricity_price' in data:
-        val = float(data['electricity_price'])
-        if 0 <= val <= 100:
+        val = number('electricity_price', float, 0, 100, 'Elpris')
+        if val is not None:
             config['electricity_price'] = round(val, 2)
 
     if 'retention_days' in data:
-        val = int(data['retention_days'])
-        if val == 0 or (7 <= val <= 365):
-            config.setdefault('retention', {})['days'] = val
+        val = number('retention_days', int, 0, 365, 'Lagring')
+        if val is not None:
+            if val != 0 and val < 7:
+                errors.append('Lagring: 0 (obegränsat) eller 7-365 dagar')
+            else:
+                config.setdefault('retention', {})['days'] = val
+
+    if errors:
+        return jsonify({'success': False, 'message': '; '.join(errors), 'errors': errors}), 400
 
     # Write config
     try:
-        with open(config_path, 'w') as f:
+        with open(CONFIG_PATH, 'w') as f:
             yaml.dump(config, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
     except Exception as e:
         return jsonify({'success': False, 'message': f'Kunde inte spara: {e}'}), 500
@@ -327,6 +342,142 @@ def save_settings():
         'needs_restart': needs_restart,
         'message': 'Inställningar sparade'
     })
+
+
+# ==================== Schema Editor ====================
+
+SCHEMA_TYPES = {'cabinet', 'display', 'heater', 'tank', 'radiator', 'pump', 'compressor',
+                'valve3', 'expansion', 'sensor', 'label'}
+
+SCHEMA_HEADER = """# Live system schema - edited with /schema-editor
+# Coordinates in the viewbox canvas. Open the dashboard with ?grid=1 to see a grid.
+# Boxes (cabinet, display, heater, tank, radiator): x,y = top-left corner, w,h = size.
+# Points (pump, compressor, expansion, valve3, sensor): x,y = center.
+# Sizes: pipe_width (default 14) or width per pipe; r (pump, compressor); size (valve3, expansion, label).
+# Conditions: a metric name (on when > 0), or {key, gt|lt|eq|ne}, or {all: [...]}, {any: [...]}.
+"""
+
+
+def _is_number(v):
+    return isinstance(v, (int, float)) and not isinstance(v, bool)
+
+
+def validate_schema_layout(layout):
+    errors = []
+    if not isinstance(layout, dict):
+        return ['Layouten måste vara ett objekt']
+    vb = layout.get('viewbox')
+    if not (isinstance(vb, list) and len(vb) == 2 and all(_is_number(v) and v > 0 for v in vb)):
+        errors.append('viewbox: måste vara [bredd, höjd]')
+    if 'pipe_width' in layout and not (_is_number(layout['pipe_width']) and layout['pipe_width'] > 0):
+        errors.append('pipe_width: måste vara ett positivt tal')
+    pipes = layout.get('pipes', [])
+    comps = layout.get('components', [])
+    if not isinstance(pipes, list):
+        errors.append('pipes: måste vara en lista')
+        pipes = []
+    if not isinstance(comps, list):
+        errors.append('components: måste vara en lista')
+        comps = []
+    for i, p in enumerate(pipes):
+        pts = p.get('points') if isinstance(p, dict) else None
+        if not (isinstance(pts, list) and len(pts) >= 2 and
+                all(isinstance(pt, list) and len(pt) == 2 and all(_is_number(v) for v in pt) for pt in pts)):
+            errors.append(f'pipes[{i}]: points måste vara minst två [x, y]')
+        if isinstance(p, dict) and 'width' in p and not (_is_number(p['width']) and p['width'] > 0):
+            errors.append(f'pipes[{i}].width: måste vara ett positivt tal')
+    for i, c in enumerate(comps):
+        if not isinstance(c, dict) or c.get('type') not in SCHEMA_TYPES:
+            errors.append(f'components[{i}]: okänd typ {c.get("type") if isinstance(c, dict) else c!r}')
+            continue
+        for key in ('x', 'y', 'w', 'h', 'r', 'size'):
+            if key in c and not _is_number(c[key]):
+                errors.append(f'components[{i}].{key}: måste vara ett tal')
+    return errors
+
+
+SCHEMA_KEY_ORDER = ['type', 'medium', 'width', 'x', 'y', 'w', 'h', 'r', 'size', 'points', 'label', 'text',
+                    'value', 'unit', 'decimals', 'key', 'gt', 'lt', 'eq', 'ne', 'all', 'any',
+                    'active', 'flow', 'rows', 'steps']
+
+
+def _order_keys(obj):
+    if isinstance(obj, dict):
+        rank = {k: i for i, k in enumerate(SCHEMA_KEY_ORDER)}
+        return {k: _order_keys(obj[k]) for k in sorted(obj, key=lambda k: rank.get(k, len(rank)))}
+    if isinstance(obj, list):
+        return [_order_keys(v) for v in obj]
+    return obj
+
+
+def schema_to_yaml(layout):
+    """One line per pipe/component, keys in a readable order"""
+    def line(item):
+        return yaml.safe_dump(_order_keys(item), default_flow_style=True, sort_keys=False,
+                              allow_unicode=True, width=float('inf')).strip()
+
+    out = [SCHEMA_HEADER.rstrip(), f"viewbox: {line(layout['viewbox'])}"]
+    if 'pipe_width' in layout:
+        out.append(f"pipe_width: {layout['pipe_width']}")
+    out += ['', 'pipes:']
+    out += [f'  - {line(p)}' for p in layout.get('pipes', [])]
+    out += ['', 'components:']
+    out += [f'  - {line(c)}' for c in layout.get('components', [])]
+    return '\n'.join(out) + '\n'
+
+
+def _schema_provider(brand):
+    if brand not in get_supported_brands():
+        return None
+    return provider if brand == provider.get_brand_name() else get_provider(brand)
+
+
+@app.route('/schema-editor')
+def schema_editor():
+    return render_template('schema_editor.html',
+                           brand=provider.get_brand_name(),
+                           brands=get_supported_brands())
+
+
+@app.route('/api/schema/<brand>')
+def get_schema(brand):
+    p = _schema_provider(brand)
+    if p is None:
+        return jsonify({'error': f'Okänt märke: {brand}'}), 404
+    return jsonify(p.get_schema_layout() or {'viewbox': [800, 450], 'pipes': [], 'components': []})
+
+
+@app.route('/api/registers/<brand>')
+def get_registers(brand):
+    p = _schema_provider(brand)
+    if p is None:
+        return jsonify({'error': f'Okänt märke: {brand}'}), 404
+    regs = [{'name': r['name'], 'description': r.get('description', ''),
+             'unit': r.get('unit', ''), 'type': r.get('type', '')} for r in p.registers.values()]
+    return jsonify(sorted(regs, key=lambda r: r['name']))
+
+
+@app.route('/api/schema/<brand>', methods=['POST'])
+def save_schema(brand):
+    p = _schema_provider(brand)
+    if p is None:
+        return jsonify({'success': False, 'message': f'Okänt märke: {brand}'}), 404
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({'success': False, 'message': 'Ogiltig JSON'}), 400
+    layout = data.get('layout')
+    errors = validate_schema_layout(layout)
+    if errors:
+        return jsonify({'success': False, 'message': '; '.join(errors), 'errors': errors}), 400
+
+    text = schema_to_yaml(layout)
+    if data.get('save'):
+        try:
+            p.get_schema_path().write_text(text, encoding='utf-8')
+        except Exception as e:
+            return jsonify({'success': False, 'message': f'Kunde inte spara: {e}'}), 500
+        logger.info(f"✅ Saved schema for {brand}")
+    return jsonify({'success': True, 'yaml': text})
 
 
 # Allowed container names for restart (safety whitelist)
@@ -460,29 +611,8 @@ def get_all_metrics_debug():
         return jsonify({'error': str(e), 'metrics': [], 'traceback': str(e)}), 500
 
 
-def fetch_all_data_parallel(time_range):
-    """
-    Fetch all dashboard data in parallel using eventlet green threads.
-
-    This reduces load time from ~20s (sequential) to ~2-3s (parallel)
-    by running all InfluxDB queries simultaneously.
-
-    OPTIMIZATION: Uses batch fetching for all time ranges to reduce round-trips.
-    """
-    start_time = time.time()
-
-    # Use optimized batch fetch for ALL time ranges (much faster)
-    logger.info(f"🚀 Using optimized batch fetch for {time_range}")
-    return fetch_all_data_batch(time_range)
-
-
 def fetch_all_data_batch(time_range):
-    """
-    OPTIMIZED: Fetch all metrics in ONE InfluxDB query, then split.
-
-    This reduces 30d load time from 8s to ~2s by minimizing InfluxDB round-trips.
-    Instead of 10 separate queries, we do 1 big query with all metrics.
-    """
+    """Fetch all dashboard data: batch, viz-wide, hot water, runtime, min/max and latest queries."""
     start_time = time.time()
 
     # List ALL metrics we need (including alarm/status for events)
@@ -541,11 +671,13 @@ def fetch_all_data_batch(time_range):
     cop_cache_elapsed = time.time() - cop_cache_start
     logger.info(f"    ⏱️  COP calculation took {cop_cache_elapsed:.2f}s")
 
-    # OPTIMIZATION: Calculate hot water stats from batch data (eliminates 2.5s InfluxDB query)
-    logger.info(f"  📊 Pre-calculating hot water stats from batch data (used by kpi task)...")
+    # Hot water cycles need fine-grained data (coarse buckets hide short cycles).
+    # Short ranges are widened to 7d so cycles/day is meaningful.
     hw_cache_start = time.time()
-    # Use same time range as batch query for consistency (batch data already fetched)
-    cached_hot_water_stats = data_query.analyze_hot_water_cycles_from_df(df, time_range)
+    hw_range = '7d' if time_range in ('1h', '6h', '24h') else time_range
+    hw_window = '1m' if hw_range == '7d' else '5m'
+    hw_df = data_query.query_metrics(['switch_valve_status', 'power_consumption'], hw_range, aggregation_window=hw_window)
+    cached_hot_water_stats = data_query.analyze_hot_water_cycles_from_df(hw_df, hw_range)
     hw_cache_elapsed = time.time() - hw_cache_start
     logger.info(f"    ⏱️  Hot water analysis took {hw_cache_elapsed:.2f}s")
 
@@ -581,33 +713,20 @@ def fetch_all_data_batch(time_range):
     events_cache_elapsed = time.time() - events_cache_start
     logger.info(f"    ⏱️  Event log calculation took {events_cache_elapsed:.2f}s")
 
-    pool = eventlet.GreenPool(size=10)
+    price_per_kwh = load_config().get('electricity_price', 2.0)
 
-    tasks = {
-        'cop': lambda: get_cop_data_from_pivot(cached_cop_df),  # Uses interval COP data
-        'temperature': lambda: get_temperature_data_from_pivot(viz_df_pivot),  # Uses pivoted viz data (aligned)
-        'runtime': lambda: get_runtime_data_cached(cached_runtime_stats),
-        'sankey': lambda: get_sankey_data_cached(cached_cop_df, cached_runtime_stats),  # Uses COP for average
-        'performance': lambda: get_performance_data_from_pivot(viz_df_pivot),  # Uses pivoted viz data (aligned)
-        'power': lambda: get_power_data_from_df(df),  # Uses batch data (OK for simple power chart)
-        'valve': lambda: get_valve_data_from_df(df),  # Uses batch data (OK for valve status)
-        'status': lambda: get_status_data_fully_cached(cached_cop_df, cached_min_max, cached_latest_values, cached_alarm_status),
-        'events': lambda: get_event_log_cached(cached_events),  # Uses pre-calculated events
-        'kpi': lambda: get_kpi_data_cached(time_range, cached_runtime_stats, cached_hot_water_stats),
+    data = {
+        'cop': get_cop_data_from_pivot(cached_cop_df),
+        'temperature': get_temperature_data_from_pivot(viz_df_pivot),
+        'runtime': get_runtime_data_cached(cached_runtime_stats),
+        'sankey': get_sankey_data_cached(cached_cop_df, cached_runtime_stats),
+        'performance': get_performance_data_from_pivot(viz_df_pivot),
+        'power': get_power_data_from_df(df),
+        'valve': get_valve_data_from_df(df),
+        'status': get_status_data_fully_cached(cached_cop_df, cached_min_max, cached_latest_values, cached_alarm_status),
+        'events': get_event_log_cached(cached_events),
+        'kpi': get_kpi_data_cached(time_range, cached_runtime_stats, cached_hot_water_stats, price_per_kwh),
     }
-
-    results = {}
-    for key, task in tasks.items():
-        results[key] = pool.spawn(task)
-
-    # Collect results with timing
-    data = {}
-    for key, green_thread in results.items():
-        task_start = time.time()
-        data[key] = green_thread.wait()
-        task_elapsed = time.time() - task_start
-        if task_elapsed > 0.5:  # Log slow tasks
-            logger.info(f"    ⏱️  Task '{key}' took {task_elapsed:.2f}s")
 
     process_elapsed = time.time() - process_start
     logger.info(f"  ⏱️  Data processing took {process_elapsed:.2f}s")
@@ -924,13 +1043,8 @@ def get_valve_data_from_df(df):
             logger.warning("get_valve_data_from_df: DataFrame is empty")
             return result
 
-        # Debug: show available metrics
-        available_metrics = df['name'].unique().tolist() if 'name' in df.columns else []
-        logger.info(f"get_valve_data_from_df: Available metrics: {available_metrics}")
-
         # Get valve status
         valve = df[df['name'] == 'switch_valve_status']
-        logger.info(f"get_valve_data_from_df: switch_valve_status rows: {len(valve)}")
         if not valve.empty:
             result['valve_status'] = _to_chart_data(valve, '_time', '_value')
             result['timestamps'] = valve['_time'].astype(str).tolist()
@@ -959,13 +1073,14 @@ def get_valve_data_from_df(df):
 @app.route('/api/initial-data')
 def get_initial_data():
     """Load all graph data for initial page load - PARALLELIZED"""
-    time_range = request.args.get('range', '24h')
+    try:
+        time_range = validate_time_range(request.args.get('range', '24h'))
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
 
     try:
         logger.info(f"📥 Loading initial data for range: {time_range}")
-
-        # Use parallel fetching for much faster load times
-        data = fetch_all_data_parallel(time_range)
+        data = fetch_all_data_batch(time_range)
 
         logger.info(f"✅ Initial data loaded successfully")
         # Clean NaN values before JSON serialization
@@ -978,75 +1093,6 @@ def get_initial_data():
 
 
 # ==================== Data Extraction Functions ====================
-
-def get_cop_data(time_range):
-    """Extract COP data from data_query"""
-    try:
-        cop_df = data_query.calculate_cop(time_range)
-
-        if cop_df.empty or 'estimated_cop' not in cop_df.columns:
-            return {'timestamps': [], 'values': [], 'avg': 0}
-
-        # Filter out null/NaN values to avoid gaps in chart
-        cop_df = cop_df.dropna(subset=['estimated_cop'])
-
-        if cop_df.empty:
-            return {'timestamps': [], 'values': [], 'avg': 0}
-
-        return {
-            'timestamps': cop_df['_time'].astype(str).tolist(),
-            'values': cop_df['estimated_cop'].tolist(),
-            'avg': float(cop_df['estimated_cop'].mean())
-        }
-    except Exception as e:
-        logger.error(f"Error getting COP data: {e}")
-        return {'timestamps': [], 'values': [], 'avg': 0}
-
-
-def get_temperature_data(time_range):
-    """Extract temperature data from data_query"""
-    try:
-        metrics = [
-            'outdoor_temp', 'indoor_temp', 'radiator_forward',
-            'radiator_return', 'hot_water_top',
-            'brine_in_evaporator', 'brine_out_condenser'
-        ]
-
-        df = data_query.query_metrics(metrics, time_range)
-
-        result = {'timestamps': []}
-
-        if not df.empty:
-            # Get common timestamps from first metric
-            first_metric = df[df['name'] == metrics[0]]
-            if not first_metric.empty:
-                result['timestamps'] = first_metric['_time'].astype(str).tolist()
-
-            # Extract data for each metric
-            for metric in metrics:
-                metric_df = df[df['name'] == metric]
-                if not metric_df.empty:
-                    result[metric] = metric_df['_value'].tolist()
-
-        return result
-    except Exception as e:
-        logger.error(f"Error getting temperature data: {e}")
-        return {'timestamps': []}
-
-
-def get_runtime_data(time_range):
-    """Extract runtime statistics"""
-    try:
-        runtime_stats = data_query.calculate_runtime_stats(time_range)
-        return {
-            'compressor_percent': runtime_stats.get('compressor_runtime_percent', 0),
-            'aux_heater_percent': runtime_stats.get('aux_heater_runtime_percent', 0),
-            'inactive_percent': 100 - runtime_stats.get('compressor_runtime_percent', 0) -
-                              runtime_stats.get('aux_heater_runtime_percent', 0)
-        }
-    except Exception as e:
-        logger.error(f"Error getting runtime data: {e}")
-        return {'compressor_percent': 0, 'aux_heater_percent': 0, 'inactive_percent': 100}
 
 
 def get_runtime_data_cached(cached_runtime_stats):
@@ -1063,86 +1109,19 @@ def get_runtime_data_cached(cached_runtime_stats):
         return {'compressor_percent': 0, 'aux_heater_percent': 0, 'inactive_percent': 100}
 
 
-def get_sankey_data(time_range):
-    """Build Sankey diagram data"""
-    try:
-        cop_df = data_query.calculate_cop(time_range)
-        runtime_stats = data_query.calculate_runtime_stats(time_range)
-
-        # Calculate energy flows (same logic as Plotly version)
-        if cop_df.empty or 'estimated_cop' not in cop_df.columns:
-            avg_cop = 3.0
-            has_data = False
-        else:
-            avg_cop = float(cop_df['estimated_cop'].mean())
-            has_data = True
-
-        # Ensure reasonable COP value
-        if avg_cop < 1.5 or avg_cop > 5.0:
-            avg_cop = 3.5
-
-        # Calculate energy flows (normalized to 100 units electric power)
-        electric_power = 100
-        ground_energy = electric_power * (avg_cop - 1)
-        aux_heater_percent = runtime_stats.get('aux_heater_runtime_percent', 0)
-        aux_heater_power = (aux_heater_percent / 100) * 50 if aux_heater_percent > 0 else 0
-        total_heat = electric_power + ground_energy + aux_heater_power
-        free_energy_percent = (ground_energy / total_heat * 100) if total_heat > 0 else 0
-
-        # Build nodes and links
-        nodes = [
-            {'name': '🌍 Markenergi'},
-            {'name': '⚡ Elkraft'},
-            {'name': '🔄 Värmepump'},
-            {'name': '🏠 Värme till Hus'}
-        ]
-
-        links = [
-            {'source': '🌍 Markenergi', 'target': '🔄 Värmepump', 'value': ground_energy},
-            {'source': '⚡ Elkraft', 'target': '🔄 Värmepump', 'value': electric_power},
-            {'source': '🔄 Värmepump', 'target': '🏠 Värme till Hus', 'value': total_heat - aux_heater_power}
-        ]
-
-        if aux_heater_power > 5:
-            nodes.append({'name': '🔥 Tillsattsvärme'})
-            links.append({'source': '🔥 Tillsattsvärme', 'target': '🏠 Värme till Hus', 'value': aux_heater_power})
-
-        return {
-            'nodes': nodes,
-            'links': links,
-            'cop': avg_cop,
-            'free_energy_percent': free_energy_percent,
-            'has_data': has_data
-        }
-    except Exception as e:
-        logger.error(f"Error getting Sankey data: {e}")
-        return {
-            'nodes': [],
-            'links': [],
-            'cop': 0,
-            'free_energy_percent': 0,
-            'has_data': False
-        }
-
-
 def get_sankey_data_cached(cached_cop_df, cached_runtime_stats):
     """Build Sankey diagram data using pre-calculated COP and runtime stats (avoids redundant InfluxDB queries)"""
     try:
         # Calculate energy flows (same logic as Plotly version)
-        if cached_cop_df.empty or 'estimated_cop' not in cached_cop_df.columns:
-            avg_cop = 3.0
-            has_data = False
-        else:
-            avg_cop = float(cached_cop_df['estimated_cop'].mean())
-            has_data = True
-
-        # Ensure reasonable COP value
-        if avg_cop < 1.5 or avg_cop > 5.0:
-            avg_cop = 3.5
+        cop_values = cached_cop_df['estimated_cop'].dropna() if 'estimated_cop' in cached_cop_df.columns else pd.Series(dtype=float)
+        if cop_values.empty:
+            return {'nodes': [], 'links': [], 'cop': None, 'free_energy_percent': 0, 'has_data': False}
+        avg_cop = float(cop_values.mean())
+        has_data = True
 
         # Calculate energy flows (normalized to 100 units electric power)
         electric_power = 100
-        ground_energy = electric_power * (avg_cop - 1)
+        ground_energy = electric_power * max(avg_cop - 1, 0)
         aux_heater_percent = cached_runtime_stats.get('aux_heater_runtime_percent', 0)
         aux_heater_power = (aux_heater_percent / 100) * 50 if aux_heater_percent > 0 else 0
         total_heat = electric_power + ground_energy + aux_heater_power
@@ -1182,354 +1161,6 @@ def get_sankey_data_cached(cached_cop_df, cached_runtime_stats):
             'free_energy_percent': 0,
             'has_data': False
         }
-
-
-def get_performance_data(time_range):
-    """Extract performance graph data (delta temperatures + compressor status)"""
-    try:
-        metrics = [
-            'brine_in_evaporator',
-            'brine_out_condenser',
-            'radiator_forward',
-            'radiator_return',
-            'compressor_status'
-        ]
-
-        df = data_query.query_metrics(metrics, time_range)
-
-        result = {
-            'brine_delta': [],
-            'radiator_delta': [],
-            'compressor_status': [],
-            'timestamps': []
-        }
-
-        if not df.empty:
-            # Calculate brine delta (ΔT)
-            brine_in = df[df['name'] == 'brine_in_evaporator']
-            brine_out = df[df['name'] == 'brine_out_condenser']
-
-            if not brine_in.empty and not brine_out.empty:
-                import pandas as pd
-                brine_delta = pd.merge(
-                    brine_in[['_time', '_value']],
-                    brine_out[['_time', '_value']],
-                    on='_time',
-                    suffixes=('_in', '_out')
-                )
-                brine_delta['delta'] = brine_delta['_value_in'] - brine_delta['_value_out']
-
-                result['brine_delta'] = [
-                    [row['_time'].isoformat(), float(row['delta'])]
-                    for _, row in brine_delta.iterrows()
-                ]
-
-            # Calculate radiator delta (ΔT)
-            rad_forward = df[df['name'] == 'radiator_forward']
-            rad_return = df[df['name'] == 'radiator_return']
-
-            if not rad_forward.empty and not rad_return.empty:
-                import pandas as pd
-                rad_delta = pd.merge(
-                    rad_forward[['_time', '_value']],
-                    rad_return[['_time', '_value']],
-                    on='_time',
-                    suffixes=('_fwd', '_ret')
-                )
-                rad_delta['delta'] = rad_delta['_value_fwd'] - rad_delta['_value_ret']
-
-                result['radiator_delta'] = [
-                    [row['_time'].isoformat(), float(row['delta'])]
-                    for _, row in rad_delta.iterrows()
-                ]
-
-            # Get compressor status
-            comp = df[df['name'] == 'compressor_status']
-            if not comp.empty:
-                result['compressor_status'] = [
-                    [row['_time'].isoformat(), float(row['_value'])]
-                    for _, row in comp.iterrows()
-                ]
-                result['timestamps'] = comp['_time'].astype(str).tolist()
-
-        return result
-    except Exception as e:
-        logger.error(f"Error getting performance data: {e}")
-        return {
-            'brine_delta': [],
-            'radiator_delta': [],
-            'compressor_status': [],
-            'timestamps': []
-        }
-
-
-def get_power_data(time_range):
-    """Extract power graph data (power consumption + system status)"""
-    try:
-        metrics = [
-            'power_consumption',
-            'compressor_status',
-            'additional_heat_percent'
-        ]
-
-        df = data_query.query_metrics(metrics, time_range)
-
-        result = {
-            'power_consumption': [],
-            'compressor_status': [],
-            'additional_heat_percent': [],
-            'timestamps': []
-        }
-
-        if not df.empty:
-            # Get power consumption
-            power = df[df['name'] == 'power_consumption']
-            if not power.empty:
-                result['power_consumption'] = [
-                    [row['_time'].isoformat(), float(row['_value'])]
-                    for _, row in power.iterrows()
-                ]
-                result['timestamps'] = power['_time'].astype(str).tolist()
-
-            # Get compressor status
-            comp = df[df['name'] == 'compressor_status']
-            if not comp.empty:
-                result['compressor_status'] = [
-                    [row['_time'].isoformat(), float(row['_value'])]
-                    for _, row in comp.iterrows()
-                ]
-
-            # Get auxiliary heater percentage
-            heater = df[df['name'] == 'additional_heat_percent']
-            if not heater.empty:
-                result['additional_heat_percent'] = [
-                    [row['_time'].isoformat(), float(row['_value'])]
-                    for _, row in heater.iterrows()
-                ]
-
-        return result
-    except Exception as e:
-        logger.error(f"Error getting power data: {e}")
-        return {
-            'power_consumption': [],
-            'compressor_status': [],
-            'additional_heat_percent': [],
-            'timestamps': []
-        }
-
-
-def get_valve_data(time_range):
-    """Extract valve status graph data (valve + compressor + hot water temp)"""
-    try:
-        metrics = [
-            'switch_valve_status',
-            'compressor_status',
-            'hot_water_top'
-        ]
-
-        df = data_query.query_metrics(metrics, time_range)
-
-        result = {
-            'valve_status': [],
-            'compressor_status': [],
-            'hot_water_temp': [],
-            'timestamps': []
-        }
-
-        if not df.empty:
-            # Get valve status
-            valve = df[df['name'] == 'switch_valve_status']
-            if not valve.empty:
-                result['valve_status'] = [
-                    [row['_time'].isoformat(), float(row['_value'])]
-                    for _, row in valve.iterrows()
-                ]
-                result['timestamps'] = valve['_time'].astype(str).tolist()
-
-            # Get compressor status
-            comp = df[df['name'] == 'compressor_status']
-            if not comp.empty:
-                result['compressor_status'] = [
-                    [row['_time'].isoformat(), float(row['_value'])]
-                    for _, row in comp.iterrows()
-                ]
-
-            # Get hot water temperature
-            hw_temp = df[df['name'] == 'hot_water_top']
-            if not hw_temp.empty:
-                result['hot_water_temp'] = [
-                    [row['_time'].isoformat(), float(row['_value'])]
-                    for _, row in hw_temp.iterrows()
-                ]
-
-        return result
-    except Exception as e:
-        logger.error(f"Error getting valve data: {e}")
-        return {
-            'valve_status': [],
-            'compressor_status': [],
-            'hot_water_temp': [],
-            'timestamps': []
-        }
-
-
-def get_status_data(time_range='24h'):
-    """Get current system status including alarm, compressor, current metrics, and min/max values"""
-    try:
-        # Get alarm status
-        alarm = data_query.get_alarm_status()
-
-        # Get current metrics for status display
-        current_metrics = data_query.get_latest_values()
-
-        # Get min/max values for the time range
-        min_max = data_query.get_min_max_values(time_range)
-
-        # Calculate COP - use Period COP (Σheat/Σelec) for consistency
-        current_cop = None
-        try:
-            cop_df = data_query.calculate_cop(time_range)
-            if not cop_df.empty:
-                # Prefer seasonal_cop (total COP = Σheat/Σelec)
-                if 'seasonal_cop' in cop_df.columns:
-                    seasonal_values = cop_df['seasonal_cop'].dropna()
-                    if len(seasonal_values) > 0:
-                        current_cop = round(seasonal_values.iloc[-1], 2)
-                elif 'estimated_cop' in cop_df.columns:
-                    cop_values = cop_df['estimated_cop'].dropna()
-                    if len(cop_values) > 0:
-                        current_cop = round(cop_values.mean(), 2)
-        except Exception as e:
-            logger.debug(f"Could not calculate COP: {e}")
-            pass
-
-        # Use partial to bind closure variables to standalone helper
-        def get_value(metric_name):
-            return _get_value_with_minmax(metric_name, current_metrics, min_max)
-
-        status = {
-            'alarm': {
-                'is_active': alarm.get('is_alarm', False),
-                'code': alarm.get('alarm_code'),
-                'description': alarm.get('alarm_description'),
-                'time': alarm['alarm_time'].isoformat() if alarm.get('alarm_time') else None
-            },
-            'current': {
-                'outdoor_temp': get_value('outdoor_temp'),
-                'indoor_temp': get_value('indoor_temp'),
-                'hot_water': get_value('hot_water_top'),
-                'brine_in': get_value('brine_in_evaporator'),
-                'brine_out': get_value('brine_out_condenser'),
-                # IVT uses heat_carrier_forward/return, Thermia uses radiator_forward/return
-                'radiator_forward': get_value('heat_carrier_forward') if get_value('heat_carrier_forward').get('current') is not None else get_value('radiator_forward'),
-                'radiator_return': get_value('heat_carrier_return') if get_value('heat_carrier_return').get('current') is not None else get_value('radiator_return'),
-                'power': round(current_metrics.get('power_consumption', {}).get('value', 0), 0) if current_metrics.get('power_consumption', {}).get('value') is not None else None,
-                'compressor_running': bool(current_metrics.get('compressor_status', {}).get('value', 0)),
-                'brine_pump_running': bool(current_metrics.get('brine_pump_status', {}).get('value', 0)),
-                'radiator_pump_running': bool(current_metrics.get('radiator_pump_status', {}).get('value', 0)),
-                'vvb_pump_running': bool(current_metrics.get('pump_heat_circuit', {}).get('value', 0)),  # IVT only
-                'switch_valve_status': int(current_metrics.get('switch_valve_status', {}).get('value', 0)) if current_metrics.get('switch_valve_status', {}).get('value') is not None else 0,
-                'aux_heater': current_metrics.get('additional_heat_percent', {}).get('value', 0) > 0 if current_metrics.get('additional_heat_percent', {}).get('value') is not None else False,
-                'current_cop': current_cop
-            },
-            'timestamp': datetime.now().isoformat()
-        }
-
-        return status
-    except Exception as e:
-        logger.error(f"Error getting status data: {e}")
-        return {
-            'alarm': {'is_active': False, 'code': None, 'description': None, 'time': None},
-            'current': {},
-            'timestamp': datetime.now().isoformat()
-        }
-
-
-def get_status_data_cached(time_range='24h', cached_cop_df=None, cached_min_max=None):
-    """Get current system status using cached COP and min/max data (avoids 3s+ duplicate calculations)"""
-    try:
-        # Get alarm status
-        alarm = data_query.get_alarm_status()
-
-        # Get current metrics for status display
-        current_metrics = data_query.get_latest_values()
-
-        # Use cached min/max values if provided (avoids 3 separate DB queries)
-        min_max = cached_min_max if cached_min_max is not None else data_query.get_min_max_values(time_range)
-
-        # Use cached COP data - use Period COP (Σheat/Σelec) for consistency
-        current_cop = None
-        if cached_cop_df is not None and not cached_cop_df.empty:
-            if 'seasonal_cop' in cached_cop_df.columns:
-                seasonal_values = cached_cop_df['seasonal_cop'].dropna()
-                if len(seasonal_values) > 0:
-                    current_cop = round(seasonal_values.iloc[-1], 2)
-            elif 'estimated_cop' in cached_cop_df.columns:
-                cop_values = cached_cop_df['estimated_cop'].dropna()
-                if len(cop_values) > 0:
-                    current_cop = round(cop_values.mean(), 2)
-
-        # Use wrapper to bind closure variables to standalone helper
-        def get_value(metric_name):
-            return _get_value_with_minmax(metric_name, current_metrics, min_max)
-
-        status = {
-            'alarm': {
-                'is_active': alarm.get('is_alarm', False),
-                'code': alarm.get('alarm_code'),
-                'description': alarm.get('alarm_description'),
-                'time': alarm['alarm_time'].isoformat() if alarm.get('alarm_time') else None
-            },
-            'current': {
-                'outdoor_temp': get_value('outdoor_temp'),
-                'indoor_temp': get_value('indoor_temp'),
-                'hot_water': get_value('hot_water_top'),
-                'brine_in': get_value('brine_in_evaporator'),
-                'brine_out': get_value('brine_out_condenser'),
-                # IVT uses heat_carrier_forward/return, Thermia uses radiator_forward/return
-                'radiator_forward': get_value('heat_carrier_forward') if get_value('heat_carrier_forward').get('current') is not None else get_value('radiator_forward'),
-                'radiator_return': get_value('heat_carrier_return') if get_value('heat_carrier_return').get('current') is not None else get_value('radiator_return'),
-                'power': round(current_metrics.get('power_consumption', {}).get('value', 0), 0) if current_metrics.get('power_consumption', {}).get('value') is not None else None,
-                'compressor_running': bool(current_metrics.get('compressor_status', {}).get('value', 0)),
-                'brine_pump_running': bool(current_metrics.get('brine_pump_status', {}).get('value', 0)),
-                'radiator_pump_running': bool(current_metrics.get('radiator_pump_status', {}).get('value', 0)),
-                'vvb_pump_running': bool(current_metrics.get('pump_heat_circuit', {}).get('value', 0)),  # IVT only
-                'switch_valve_status': int(current_metrics.get('switch_valve_status', {}).get('value', 0)) if current_metrics.get('switch_valve_status', {}).get('value') is not None else 0,
-                'aux_heater': current_metrics.get('additional_heat_percent', {}).get('value', 0) > 0 if current_metrics.get('additional_heat_percent', {}).get('value') is not None else False,
-                'current_cop': current_cop
-            },
-            'timestamp': datetime.now().isoformat()
-        }
-
-        return status
-    except Exception as e:
-        logger.error(f"Error getting cached status data: {e}")
-        return {
-            'alarm': {'is_active': False, 'code': None, 'description': None, 'time': None},
-            'current': {},
-            'timestamp': datetime.now().isoformat()
-        }
-
-
-def get_event_log(limit=20):
-    """Get recent event log entries"""
-    try:
-        events = data_query.get_event_log(limit=limit)
-
-        event_list = []
-        for event in events:
-            event_list.append({
-                'time': event.get('time', '').isoformat() if hasattr(event.get('time', ''), 'isoformat') else str(event.get('time', '')),
-                'type': event.get('type', 'unknown'),
-                'description': event.get('event', 'No description'),  # 'event' key contains the description
-                'value': event.get('value'),
-                'icon': event.get('icon', '')
-            })
-
-        return event_list
-    except Exception as e:
-        logger.error(f"Error getting event log: {e}")
-        return []
 
 
 def get_event_log_cached(cached_events):
@@ -1620,6 +1251,7 @@ def get_status_data_fully_cached(cached_cop_df, cached_min_max, cached_latest_va
                 'hotgas_temp': hotgas_temp,  # Hetgas temperature (pressure_tube_temp or hot_gas_temp)
                 'degree_minutes': degree_minutes  # Integral value
             },
+            'latest': {name: m.get('value') for name, m in current_metrics.items()},
             'timestamp': datetime.now().isoformat()
         }
 
@@ -1630,52 +1262,6 @@ def get_status_data_fully_cached(cached_cop_df, cached_min_max, cached_latest_va
             'alarm': {'is_active': False, 'code': None, 'description': None, 'time': None},
             'current': {},
             'timestamp': datetime.now().isoformat()
-        }
-
-
-def get_kpi_data(time_range='24h', price_per_kwh=2.0):
-    """Get extended KPI metrics (energy, runtime, hot water)"""
-    try:
-        # Calculate energy costs
-        energy_costs = data_query.calculate_energy_costs(time_range, price_per_kwh)
-
-        # Calculate runtime statistics
-        runtime_stats = data_query.calculate_runtime_stats(time_range)
-
-        # Analyze hot water cycles (use longer period for meaningful stats)
-        hw_time_range = '7d' if time_range in ['1h', '6h', '24h'] else time_range
-        hot_water_stats = data_query.analyze_hot_water_cycles(hw_time_range)
-
-        kpi = {
-            'energy': {
-                'total_kwh': energy_costs.get('total_kwh', 0),
-                'total_cost': energy_costs.get('total_cost', 0),
-                'avg_power': energy_costs.get('avg_power', 0),
-                'peak_power': energy_costs.get('peak_power', 0)
-            },
-            'runtime': {
-                'compressor_hours': runtime_stats.get('compressor_runtime_hours', 0),
-                'compressor_percent': runtime_stats.get('compressor_runtime_percent', 0),
-                'compressor_starts': runtime_stats.get('compressor_starts', 0),
-                'aux_heater_hours': runtime_stats.get('aux_heater_runtime_hours', 0),
-                'aux_heater_percent': runtime_stats.get('aux_heater_runtime_percent', 0),
-                'total_hours': runtime_stats.get('total_hours', 0)
-            },
-            'hot_water': {
-                'total_cycles': hot_water_stats.get('total_cycles', 0),
-                'cycles_per_day': hot_water_stats.get('cycles_per_day', 0),
-                'avg_duration_minutes': hot_water_stats.get('avg_cycle_duration_minutes', 0),
-                'avg_energy_kwh': hot_water_stats.get('avg_energy_per_cycle_kwh', 0)
-            }
-        }
-
-        return kpi
-    except Exception as e:
-        logger.error(f"Error getting KPI data: {e}")
-        return {
-            'energy': {'total_kwh': 0, 'total_cost': 0, 'avg_power': 0, 'peak_power': 0},
-            'runtime': {'compressor_hours': 0, 'compressor_percent': 0, 'compressor_starts': 0, 'aux_heater_hours': 0, 'aux_heater_percent': 0, 'total_hours': 0},
-            'hot_water': {'total_cycles': 0, 'cycles_per_day': 0, 'avg_duration_minutes': 0, 'avg_energy_kwh': 0}
         }
 
 
@@ -1756,7 +1342,11 @@ def handle_ping():
 def handle_time_range_change(data):
     """Handle time range change from client - PARALLELIZED"""
     client_id = request.sid
-    time_range = data.get('range', '24h')
+    try:
+        time_range = validate_time_range((data or {}).get('range', '24h'))
+    except ValueError as e:
+        emit('error', {'message': str(e)})
+        return
 
     logger.info(f"🔄 Client {client_id} changed time range to: {time_range}")
 
@@ -1766,7 +1356,7 @@ def handle_time_range_change(data):
 
     # Send updated data immediately to this client using parallel fetching
     try:
-        update_data = fetch_all_data_parallel(time_range)
+        update_data = fetch_all_data_batch(time_range)
         update_data['timestamp'] = datetime.now().isoformat()
 
         update_data = clean_nan_values(update_data)
@@ -1782,12 +1372,16 @@ def handle_time_range_change(data):
 def handle_manual_update(data):
     """Handle manual update request from client - PARALLELIZED"""
     client_id = request.sid
-    time_range = data.get('range', '24h')
+    try:
+        time_range = validate_time_range((data or {}).get('range', '24h'))
+    except ValueError as e:
+        emit('error', {'message': str(e)})
+        return
 
     logger.info(f"🔄 Client {client_id} requested manual update")
 
     try:
-        update_data = fetch_all_data_parallel(time_range)
+        update_data = fetch_all_data_batch(time_range)
         update_data['timestamp'] = datetime.now().isoformat()
 
         update_data = clean_nan_values(update_data)
@@ -1806,8 +1400,7 @@ def background_updates():
 
     while True:
         try:
-            # Wait 30 seconds (matches Dash interval)
-            eventlet.sleep(30)
+            eventlet.sleep(load_config().get('dashboard', {}).get('refresh_interval', 30))
 
             if not connected_clients:
                 continue
@@ -1822,7 +1415,7 @@ def background_updates():
                     logger.debug(f"Sending update to {client_id} with range: {time_range}")
 
                     # Use parallel fetching for much faster updates
-                    update_data = fetch_all_data_parallel(time_range)
+                    update_data = fetch_all_data_batch(time_range)
                     update_data['timestamp'] = datetime.now().isoformat()
                     update_data['time_range'] = time_range  # Include time range in response
 
@@ -1852,7 +1445,6 @@ if __name__ == '__main__':
     logger.info(f"🏢 Provider: {provider.get_brand_name()}")
     logger.info("🔌 WebSocket support: Socket.IO")
     logger.info("📈 Charts: ECharts 5.4+")
-    logger.info("⏱️  Auto-update: Every 30 seconds")
     logger.info("🌐 Dashboard will be available at http://localhost:8050")
     logger.info("=" * 60)
 
@@ -1860,6 +1452,6 @@ if __name__ == '__main__':
         app,
         host='0.0.0.0',
         port=8050,
-        debug=True,
+        debug=os.getenv('FLASK_DEBUG') == '1',
         use_reloader=False  # Disable reloader to prevent duplicate background tasks
     )
