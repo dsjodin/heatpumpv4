@@ -7,10 +7,13 @@ Supports: Thermia, IVT, NIBE
 
 # Must run before anything else is imported: makes InfluxDB I/O cooperative so one slow
 # query doesn't block the whole server, and lets queries run in parallel.
+# eventlet's own DNS resolver (greendns) is broken with current dnspython and can't
+# resolve "influxdb", so use the system resolver (Docker DNS) instead.
+import os
+os.environ.setdefault('EVENTLET_NO_GREENDNS', 'yes')
 import eventlet
 eventlet.monkey_patch()
 
-import os
 import sys
 import copy
 import time
