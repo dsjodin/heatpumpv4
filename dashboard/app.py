@@ -660,7 +660,9 @@ def fetch_all_data_batch(time_range):
     queries = {
         'batch': lambda: data_query.query_metrics(all_metrics, time_range),
         'viz': lambda: data_query.query_metrics_wide(viz_metrics, time_range, aggregation_window=viz_aggregation),
-        'hot_water': lambda: data_query.query_metrics(['switch_valve_status', 'power_consumption'], hw_range, aggregation_window=hw_window),
+        # 1h/6h/24h all use the same 7-day base, so the stats are shared and kept for HW_MAX_AGE
+        'hot_water': lambda: _cached(_hw_cache, (hw_range, hw_window), HW_MAX_AGE, lambda: data_query.analyze_hot_water_cycles_from_df(
+            data_query.query_metrics(['switch_valve_status', 'power_consumption'], hw_range, aggregation_window=hw_window), hw_range)),
         'min': lambda: data_query.get_stat_values('min', time_range, MINMAX_METRICS),
         'max': lambda: data_query.get_stat_values('max', time_range, MINMAX_METRICS),
         'mean': lambda: data_query.get_stat_values('mean', time_range, MINMAX_METRICS),
@@ -683,7 +685,7 @@ def fetch_all_data_batch(time_range):
     viz_df_pivot = results['viz']
     cached_cop_df = data_query.calculate_cop_from_pivot(viz_df_pivot)
     cached_runtime_stats = data_query.calculate_runtime_stats(time_range, df=df)
-    cached_hot_water_stats = data_query.analyze_hot_water_cycles_from_df(results['hot_water'], hw_range)
+    cached_hot_water_stats = results['hot_water']
     cached_alarm_status = data_query.get_alarm_status_from_df(df)
     cached_events = data_query.get_event_log_from_df(df, limit=20)
     price_per_kwh = load_config().get('electricity_price', 2.0)
@@ -720,8 +722,10 @@ def fetch_all_data_batch(time_range):
 # are shared by all ranges and always follow the refresh interval.
 _dashboard_cache = {}
 _latest_cache = {}
+_hw_cache = {}
+HW_MAX_AGE = 300  # hot water cycle stats over days change slowly
 _locks = {}
-WARM_RANGES = ['24h', '7d', '30d']
+WARM_RANGES = ['1h', '6h', '24h', '7d', '30d']  # every option in the time range selector
 
 
 def _refresh_age():
