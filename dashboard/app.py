@@ -353,6 +353,7 @@ SCHEMA_HEADER = """# Live system schema - edited with /schema-editor
 # Coordinates in the viewbox canvas. Open the dashboard with ?grid=1 to see a grid.
 # Boxes (cabinet, display, heater, tank, radiator): x,y = top-left corner, w,h = size.
 # Points (pump, compressor, expansion, valve3, sensor): x,y = center.
+# Sizes: pipe_width (default 14) or width per pipe; r (pump, compressor); size (valve3, expansion, label).
 # Conditions: a metric name (on when > 0), or {key, gt|lt|eq|ne}, or {all: [...]}, {any: [...]}.
 """
 
@@ -368,6 +369,8 @@ def validate_schema_layout(layout):
     vb = layout.get('viewbox')
     if not (isinstance(vb, list) and len(vb) == 2 and all(_is_number(v) and v > 0 for v in vb)):
         errors.append('viewbox: måste vara [bredd, höjd]')
+    if 'pipe_width' in layout and not (_is_number(layout['pipe_width']) and layout['pipe_width'] > 0):
+        errors.append('pipe_width: måste vara ett positivt tal')
     pipes = layout.get('pipes', [])
     comps = layout.get('components', [])
     if not isinstance(pipes, list):
@@ -381,17 +384,19 @@ def validate_schema_layout(layout):
         if not (isinstance(pts, list) and len(pts) >= 2 and
                 all(isinstance(pt, list) and len(pt) == 2 and all(_is_number(v) for v in pt) for pt in pts)):
             errors.append(f'pipes[{i}]: points måste vara minst två [x, y]')
+        if isinstance(p, dict) and 'width' in p and not (_is_number(p['width']) and p['width'] > 0):
+            errors.append(f'pipes[{i}].width: måste vara ett positivt tal')
     for i, c in enumerate(comps):
         if not isinstance(c, dict) or c.get('type') not in SCHEMA_TYPES:
             errors.append(f'components[{i}]: okänd typ {c.get("type") if isinstance(c, dict) else c!r}')
             continue
-        for key in ('x', 'y', 'w', 'h', 'r'):
+        for key in ('x', 'y', 'w', 'h', 'r', 'size'):
             if key in c and not _is_number(c[key]):
                 errors.append(f'components[{i}].{key}: måste vara ett tal')
     return errors
 
 
-SCHEMA_KEY_ORDER = ['type', 'medium', 'x', 'y', 'w', 'h', 'r', 'size', 'points', 'label', 'text',
+SCHEMA_KEY_ORDER = ['type', 'medium', 'width', 'x', 'y', 'w', 'h', 'r', 'size', 'points', 'label', 'text',
                     'value', 'unit', 'decimals', 'key', 'gt', 'lt', 'eq', 'ne', 'all', 'any',
                     'active', 'flow', 'rows', 'steps']
 
@@ -411,7 +416,10 @@ def schema_to_yaml(layout):
         return yaml.safe_dump(_order_keys(item), default_flow_style=True, sort_keys=False,
                               allow_unicode=True, width=float('inf')).strip()
 
-    out = [SCHEMA_HEADER.rstrip(), f"viewbox: {line(layout['viewbox'])}", '', 'pipes:']
+    out = [SCHEMA_HEADER.rstrip(), f"viewbox: {line(layout['viewbox'])}"]
+    if 'pipe_width' in layout:
+        out.append(f"pipe_width: {layout['pipe_width']}")
+    out += ['', 'pipes:']
     out += [f'  - {line(p)}' for p in layout.get('pipes', [])]
     out += ['', 'components:']
     out += [f'  - {line(c)}' for c in layout.get('components', [])]

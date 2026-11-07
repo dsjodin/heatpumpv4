@@ -44,15 +44,16 @@
 
     function valueBox(parent, cx, cy, w, h, c) {
         el('rect', { x: cx - w / 2, y: cy - h / 2, width: w, height: h, rx: 2, class: 'sch-valuebox' }, parent);
-        const t = el('text', { x: cx, y: cy + 1, class: 'sch-value' }, parent, '--');
+        const t = el('text', { x: cx, y: cy + 1, class: 'sch-value', style: `font-size:${h * 0.5}px` }, parent, '--');
         bindText(t, c);
     }
 
     const RENDER = {
-        pipe(g, c) {
+        pipe(g, c, layout) {
             const pts = c.points.map(p => p.join(',')).join(' ');
-            el('polyline', { points: pts, class: `sch-pipe medium-${c.medium || 'hot'}` }, g);
-            const flow = el('polyline', { points: pts, class: 'sch-flow' }, g);
+            const width = c.width ?? layout.pipe_width ?? 14;
+            el('polyline', { points: pts, class: `sch-pipe medium-${c.medium || 'hot'}`, 'stroke-width': width }, g);
+            const flow = el('polyline', { points: pts, class: 'sch-flow', 'stroke-width': Math.max(2, width * 0.3) }, g);
             bindActive(flow, c.flow);
         },
 
@@ -96,7 +97,7 @@
         },
 
         expansion(g, c) {
-            const s = 14;
+            const s = c.size || 14;
             el('path', {
                 d: `M${c.x - s * 1.6},${c.y - s} L${c.x},${c.y} L${c.x - s * 1.6},${c.y + s} Z M${c.x + s * 1.6},${c.y - s} L${c.x},${c.y} L${c.x + s * 1.6},${c.y + s} Z`,
                 class: 'sch-expansion'
@@ -153,12 +154,13 @@
         },
 
         sensor(g, c) {
-            if (c.label) el('text', { x: c.x, y: c.y - 24, class: 'sch-label' }, g, c.label);
-            valueBox(g, c.x, c.y, c.w || 72, c.h || 30, c);
+            const h = c.h || 30;
+            if (c.label) el('text', { x: c.x, y: c.y - h / 2 - 9, class: 'sch-label' }, g, c.label);
+            valueBox(g, c.x, c.y, c.w || 72, h, c);
         },
 
         label(g, c) {
-            el('text', { x: c.x, y: c.y, class: 'sch-label' }, g, c.text || '');
+            el('text', { x: c.x, y: c.y, class: 'sch-label', style: `font-size:${c.size || 14}px` }, g, c.text || '');
         }
     };
 
@@ -200,7 +202,7 @@
         const pipes = el('g', {}, svg);
         const comps = el('g', {}, svg);
         (layout.pipes || []).forEach((c, i) => {
-            RENDER.pipe(el('g', { 'data-kind': 'pipe', 'data-idx': i }, pipes), c);
+            RENDER.pipe(el('g', { 'data-kind': 'pipe', 'data-idx': i }, pipes), c, layout);
         });
         (layout.components || []).forEach((c, i) => {
             if (!RENDER[c.type]) return console.warn('Unknown schema component type:', c.type);

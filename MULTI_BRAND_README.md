@@ -329,6 +329,7 @@ live-vyn och visar live-värden från databasen.
 
 - Klicka för att välja, dra för att flytta (snäpper 5 px, Shift = fritt), piltangenter 1 px (Shift 10 px)
 - Valt rör visar handtag för varje punkt; punkter läggs till/tas bort i panelen
+- Vald komponent har en liten fyrkant för storlek (Shift = behåll proportioner); rörbredd i panelen eller under Layout
 - `Register`, `Aktiv när` och `Flöde när` föreslår registernamn och visar aktuellt värde/PÅ/AV
 - `Kopiera från` hämtar ett annat märkes layout som startpunkt
 - `Visa allt aktivt` tänder alla animationer
@@ -358,14 +359,15 @@ components:
 | `tank` | x,y,w,h | `label, value, unit, active` |
 | `radiator` | x,y,w,h | `active` |
 | `pump`, `compressor` | x,y = mitten, `r` | `active` |
-| `valve3` | x,y = mitten | `active` (pil uppåt = varmvatten, annars höger) |
-| `expansion` | x,y = mitten | - |
+| `valve3` | x,y = mitten, `size` | `active` (pil uppåt = varmvatten, annars höger) |
+| `expansion` | x,y = mitten, `size` | - |
 | `sensor` | x,y = mitten, `w,h` | `label, value, unit, decimals` |
-| `label` | x,y | `text` |
+| `label` | x,y, `size` (textstorlek) | `text` |
 
 Rör (`pipes`): `points` är en lista med koordinater i flödesriktningen, `medium` är
 `brine_in`, `brine_out`, `cold`, `hot` eller `return` (färger i `dashboard.css`, `--sch-*`),
-och `flow` styr den animerade flödeslinjen.
+och `flow` styr den animerade flödeslinjen. Rörbredd sätts för alla rör med
+`pipe_width` på toppnivå (standard 14) eller per rör med `width`.
 
 `value` och nycklar i villkor är registernamn från `registers.py` (`name`-fältet).
 Villkor (`active`, `flow`) kan vara:

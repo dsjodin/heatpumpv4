@@ -8,7 +8,7 @@
     const svg = $('sed-svg');
 
     const FIELDS = {
-        pipe: ['medium', 'flow', 'points'],
+        pipe: ['medium', 'width', 'flow', 'points'],
         cabinet: ['x', 'y', 'w', 'h'],
         display: ['x', 'y', 'w', 'h', 'rows'],
         heater: ['x', 'y', 'w', 'h', 'steps'],
@@ -17,15 +17,15 @@
         pump: ['x', 'y', 'r', 'active'],
         compressor: ['x', 'y', 'r', 'active'],
         valve3: ['x', 'y', 'size', 'active'],
-        expansion: ['x', 'y'],
+        expansion: ['x', 'y', 'size'],
         sensor: ['x', 'y', 'w', 'h', 'label', 'value', 'unit', 'decimals'],
-        label: ['x', 'y', 'text']
+        label: ['x', 'y', 'text', 'size']
     };
-    const NUMBER = new Set(['x', 'y', 'w', 'h', 'r', 'size', 'decimals']);
+    const NUMBER = new Set(['x', 'y', 'w', 'h', 'r', 'size', 'width', 'decimals']);
     const CONDITION = new Set(['active', 'flow']);
     const MEDIA = ['brine_in', 'brine_out', 'cold', 'hot', 'return'];
     const LABELS = {
-        x: 'X', y: 'Y', w: 'Bredd', h: 'Höjd', r: 'Radie', size: 'Storlek', decimals: 'Decimaler',
+        x: 'X', y: 'Y', w: 'Bredd', h: 'Höjd', r: 'Radie', size: 'Storlek', width: 'Rörbredd', decimals: 'Decimaler',
         label: 'Etikett', value: 'Register', unit: 'Enhet', text: 'Text', medium: 'Medium',
         active: 'Aktiv när', flow: 'Flöde när', points: 'Punkter', rows: 'Rader', steps: 'Steg'
     };
@@ -37,6 +37,12 @@
         radiator: { w: 135, h: 130 },
         sensor: { label: 'Givare', unit: '°C' },
         label: { text: 'Text' }
+    };
+    // Resize: boxes change w/h, the rest one size key. [key, default, size per px of handle movement]
+    const BOX = { cabinet: 'corner', display: 'corner', heater: 'corner', tank: 'corner', radiator: 'corner', sensor: 'center' };
+    const SIZE = {
+        pump: ['r', 22, 1], compressor: ['r', 26, 1], valve3: ['size', 36, 2],
+        expansion: ['size', 14, 1 / 1.6], label: ['size', 14, 0.5]
     };
 
     let brand = $('sed-brand').value;
@@ -99,6 +105,7 @@
                 .forEach(n => n.classList.add('active'));
         }
         drawSelection();
+        $('sed-pipe-width').value = layout.pipe_width ?? '';
         $('sed-vb-w').value = layout.viewbox[0];
         $('sed-vb-h').value = layout.viewbox[1];
     }
@@ -115,6 +122,32 @@
             item.points.forEach((p, i) => {
                 R.el('circle', { cx: p[0], cy: p[1], r: 6, class: 'sed-handle', 'data-pt': i }, overlay);
             });
+            return;
+        }
+        const pos = resizeHandlePos(item, b);
+        if (pos) R.el('rect', { x: pos[0] - 5, y: pos[1] - 5, width: 10, height: 10, class: 'sed-resize' }, overlay);
+    }
+
+    function resizeHandlePos(c, bbox) {
+        if (BOX[c.type] === 'corner') return [c.x + c.w, c.y + c.h];
+        if (BOX[c.type] === 'center') return [c.x + (c.w || 72) / 2, c.y + (c.h || 30) / 2];
+        const s = SIZE[c.type];
+        if (!s) return null;
+        if (c.type === 'label') return [bbox.x + bbox.width, bbox.y + bbox.height / 2];
+        return [c.x + (c[s[0]] ?? s[1]) / s[2], c.y];
+    }
+
+    function resize(c, orig, dx, dy, keepRatio) {
+        if (BOX[c.type]) {
+            const k = BOX[c.type] === 'center' ? 2 : 1;
+            let w = Math.max(5, orig.w + dx * k);
+            let h = Math.max(5, orig.h + dy * k);
+            if (keepRatio) h = Math.max(5, Math.round(w * orig.h / orig.w));
+            c.w = Math.round(w);
+            c.h = Math.round(h);
+        } else {
+            const [key, , k] = SIZE[c.type];
+            c[key] = Math.max(5, Math.round(orig.size + dx * k));
         }
     }
 
@@ -302,7 +335,16 @@
     svg.addEventListener('pointerdown', e => {
         const pt = R.toSvgPoint(svg, e);
         const handle = e.target.closest('.sed-handle');
-        if (handle && sel && sel.kind === 'pipe') {
+        if (e.target.closest('.sed-resize')) {
+            const c = selected();
+            const s = SIZE[c.type];
+            drag = {
+                type: 'resize', start: pt, moved: false,
+                orig: BOX[c.type]
+                    ? { w: c.w || 72, h: c.h || 30 }
+                    : { size: c[s[0]] ?? s[1] }
+            };
+        } else if (handle && sel && sel.kind === 'pipe') {
             const i = Number(handle.dataset.pt);
             drag = { type: 'point', i, start: pt, orig: [...layout.pipes[sel.idx].points[i]], moved: false };
         } else {
@@ -333,7 +375,10 @@
         // Snap the movement, not the position, so existing alignments are kept
         const item = selected();
         const ddx = snap(dx, e.shiftKey), ddy = snap(dy, e.shiftKey);
-        if (drag.type === 'point') {
+        if (drag.type === 'resize') {
+            // Shift keeps proportions (and skips snapping)
+            resize(item, drag.orig, ddx, ddy, e.shiftKey);
+        } else if (drag.type === 'point') {
             item.points[drag.i] = [drag.orig[0] + ddx, drag.orig[1] + ddy];
         } else if (sel.kind === 'pipe') {
             item.points = drag.orig.map(p => [p[0] + ddx, p[1] + ddy]);
@@ -426,6 +471,14 @@
     $('sed-undo').addEventListener('click', undo);
     $('sed-show-active').addEventListener('change', render);
 
+    $('sed-pipe-width').addEventListener('change', e => {
+        const v = Number(e.target.value);
+        snapshot();
+        if (e.target.value !== '' && v > 0) layout.pipe_width = v;
+        else delete layout.pipe_width;
+        render();
+    });
+
     ['sed-vb-w', 'sed-vb-h'].forEach((id, k) => {
         $(id).addEventListener('change', e => {
             const v = Number(e.target.value);
@@ -513,11 +566,13 @@
     // ---------- data ----------
 
     function normalize(l) {
-        return {
+        const out = {
             viewbox: l.viewbox || [800, 450],
             pipes: l.pipes || [],
             components: l.components || []
         };
+        if (l.pipe_width) out.pipe_width = l.pipe_width;
+        return out;
     }
 
     async function loadRegisters() {

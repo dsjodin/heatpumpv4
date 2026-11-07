@@ -832,7 +832,7 @@ body {
     font-family: 'Segoe UI', sans-serif;
 }
 
-.sch-pipe { fill: none; stroke-width: 14; stroke-linejoin: round; stroke-linecap: round; }
+.sch-pipe { fill: none; stroke-linejoin: round; stroke-linecap: round; }
 .sch-pipe.medium-brine_in { stroke: var(--sch-brine-in); }
 .sch-pipe.medium-brine_out { stroke: var(--sch-brine-out); }
 .sch-pipe.medium-cold { stroke: var(--sch-cold); }
@@ -842,7 +842,6 @@ body {
 .sch-flow {
     fill: none;
     stroke: #fff;
-    stroke-width: 4;
     stroke-linecap: round;
     stroke-linejoin: round;
     stroke-dasharray: 2 16;
@@ -971,6 +970,7 @@ body {
 .sed-list-row .form-control { min-width: 0; }
 .sed-yaml { height: 240px; font-family: monospace; font-size: 0.75rem; }
 .sed-overlay .sed-sel { fill: none; stroke: #1c7ed6; stroke-width: 2; stroke-dasharray: 6 4; pointer-events: none; }
+.sed-overlay .sed-resize { fill: #1c7ed6; stroke: #fff; stroke-width: 1.5; cursor: nwse-resize; }
 .sed-overlay .sed-handle { fill: #fff; stroke: #1c7ed6; stroke-width: 2; cursor: grab; }
 @media (max-width: 900px) {
     .sed-main { grid-template-columns: 1fr; }
