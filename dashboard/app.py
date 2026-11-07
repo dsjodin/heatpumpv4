@@ -95,7 +95,8 @@ def index():
     return render_template('dashboard.html',
                          brand=provider.get_brand_name(),
                          brand_name=provider.get_display_name(),
-                         dashboard_title=provider.get_dashboard_title())
+                         dashboard_title=provider.get_dashboard_title(),
+                         schema=provider.get_schema_layout())
 
 def clean_nan_values(obj):
     """
@@ -1113,6 +1114,7 @@ def get_status_data_fully_cached(cached_cop_df, cached_min_max, cached_latest_va
                 'hotgas_temp': hotgas_temp,  # Hetgas temperature (pressure_tube_temp or hot_gas_temp)
                 'degree_minutes': degree_minutes  # Integral value
             },
+            'latest': {name: m.get('value') for name, m in current_metrics.items()},
             'timestamp': datetime.now().isoformat()
         }
 

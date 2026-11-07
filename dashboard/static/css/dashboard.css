@@ -811,424 +811,97 @@ body {
     margin: 0;
 }
 
-/* ==================== System Schema ==================== */
-
-/* Rotating animation for pumps */
-@keyframes spin {
-    from { transform: rotate(0deg); }
-    to { transform: rotate(360deg); }
+/* ==================== System Schema (SVG, see static/js/schema.js) ==================== */
+:root {
+    --sch-brine-in: #7b3fc4;
+    --sch-brine-out: #3fa9f5;
+    --sch-cold: #5b6ee1;
+    --sch-hot: #f5134b;
+    --sch-return: #c2187a;
+    --sch-metal: #e6e8eb;
+    --sch-stroke: #333;
+    --sch-value-bg: #fcdc5c;
+    --sch-display: #9cc98a;
+    --sch-active: #2fb344;
 }
 
-/* Container for the heatpump display */
-.heatpump-display {
-    position: relative;
-    width: 800px;
-    height: 449px;
-    background-size: contain;
-    background-repeat: no-repeat;
-    margin: 0 auto;
-}
-
-/* Z-index layering: overlays at 10, text at 20 (text always on top) */
-.heatpump-display img[class^="overlay-"] {
-    z-index: 10;
-}
-.heatpump-display div[class^="text-"] {
-    z-index: 20;
-}
-
-/* ===== THERMIA Brand Styles ===== */
-.brand-thermia .heatpump-display {
-    background-image: url('../assets/schema/BV_main_Thermia.png');
-}
-
-/* Thermia overlay positions (adjusted +0.3% left, +0.8% top for alignment) */
-.brand-thermia .overlay-3kw_on {
-    position: absolute;
-    left: 50.80%;
-    top: 27.53%;
-    width: 43px;
-    height: 74px;
-    display: none;
-}
-.brand-thermia .overlay-3kw_on.active {
+.schema-svg {
     display: block;
-}
-
-.brand-thermia .overlay-BV_komp_anim {
-    position: absolute;
-    left: 22.93%;
-    top: 43.34%;
-    width: 149px;
-    height: 186px;
-    display: none;
-}
-.brand-thermia .overlay-BV_komp_anim.active {
-    display: block;
-}
-
-.brand-thermia .overlay-KB_snurr {
-    position: absolute;
-    left: 0.43%;
-    top: 50.24%;
-    width: 55px;
-    height: 55px;
-    display: none;
-}
-.brand-thermia .overlay-KB_snurr.active {
-    display: block;
-    transform-origin: center;
-    animation: spin 2s linear infinite;
-}
-
-.brand-thermia .overlay-RAD_pil {
-    position: absolute;
-    left: 72.18%;
-    top: 45.34%;
-    width: 83px;
-    height: 77px;
-    display: none;
-}
-.brand-thermia .overlay-RAD_pil.active {
-    display: block;
-}
-
-.brand-thermia .overlay-VV_pil {
-    position: absolute;
-    left: 72.18%;
-    top: 45.34%;
-    width: 83px;
-    height: 77px;
-    display: none;
-}
-.brand-thermia .overlay-VV_pil.active {
-    display: block;
-}
-
-.brand-thermia .overlay-RAD_snurr {
-    position: absolute;
-    left: 46.43%;
-    top: 68.51%;
-    width: 56px;
-    height: 56px;
-    display: none;
-}
-.brand-thermia .overlay-RAD_snurr.active {
-    display: block;
-    transform-origin: center;
-    animation: spin 2s linear infinite;
-}
-
-.brand-thermia .overlay-VV_hot {
-    position: absolute;
-    left: 69.30%;
-    top: 14.83%;
-    width: 102px;
-    height: 138px;
-    display: none;
-}
-.brand-thermia .overlay-VV_hot.active {
-    display: block;
-}
-
-.brand-thermia .overlay-RAD_hot {
-    position: absolute;
-    left: 82.18%;
-    top: 43.56%;
-    width: 142px;
-    height: 166px;
-    display: none;
-}
-.brand-thermia .overlay-RAD_hot.active {
-    display: block;
-}
-
-/* Thermia text positions */
-.brand-thermia .text-outdoor_temp {
-    position: absolute;
-    left: 34.13%;
-    top: 12.92%;
+    width: 100%;
+    height: auto;
     font-family: 'Segoe UI', sans-serif;
-    font-size: 14px;
-    font-weight: bold;
-    color: #0d0d0d;
-    white-space: nowrap;
 }
 
-.brand-thermia .text-hotgas_temp {
-    position: absolute;
-    left: 34.25%;
-    top: 19.38%;
-    font-family: 'Segoe UI', sans-serif;
-    font-size: 14px;
-    font-weight: bold;
-    color: #0d0d0d;
-    white-space: nowrap;
-}
+.sch-pipe { fill: none; stroke-width: 14; stroke-linejoin: round; stroke-linecap: round; }
+.sch-pipe.medium-brine_in { stroke: var(--sch-brine-in); }
+.sch-pipe.medium-brine_out { stroke: var(--sch-brine-out); }
+.sch-pipe.medium-cold { stroke: var(--sch-cold); }
+.sch-pipe.medium-hot { stroke: var(--sch-hot); }
+.sch-pipe.medium-return { stroke: var(--sch-return); }
 
-.brand-thermia .text-integral_value {
-    position: absolute;
-    left: 35.38%;
-    top: 28.06%;
-    font-family: 'Segoe UI', sans-serif;
-    font-size: 14px;
-    font-weight: bold;
-    color: #0d0d0d;
-    white-space: nowrap;
+.sch-flow {
+    fill: none;
+    stroke: #fff;
+    stroke-width: 4;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-dasharray: 2 16;
+    opacity: 0;
 }
+.sch-flow.active { opacity: 0.8; animation: sch-flow 0.9s linear infinite; }
+@keyframes sch-flow { to { stroke-dashoffset: -18; } }
 
-.brand-thermia .text-KB_in_temp {
-    position: absolute;
-    left: 10.75%;
-    top: 53.23%;
-    font-family: 'Segoe UI', sans-serif;
-    font-size: 16px;
-    font-weight: bold;
-    color: #0d0d0d;
-    white-space: nowrap;
-}
+.sch-cabinet { fill: var(--sch-metal); stroke: #999; stroke-width: 2; }
+.sch-cabinet-foot { fill: #555; }
+.sch-display { fill: var(--sch-display); stroke: #111; stroke-width: 4; }
+.sch-display-cell { fill: rgba(255, 255, 255, 0.35); }
+.sch-display-label { font-size: 15px; font-weight: 700; fill: #111; dominant-baseline: middle; }
 
-.brand-thermia .text-KB_out_temp {
-    position: absolute;
-    left: 10.88%;
-    top: 71.27%;
-    font-family: 'Segoe UI', sans-serif;
-    font-size: 16px;
-    font-weight: bold;
-    color: #0d0d0d;
-    white-space: nowrap;
-}
+.sch-valuebox { fill: var(--sch-value-bg); stroke: #b8962e; stroke-width: 1.5; }
+.sch-value { font-size: 15px; font-weight: 700; fill: #111; text-anchor: middle; dominant-baseline: middle; }
+.sch-label { font-size: 14px; fill: #111; text-anchor: middle; }
 
-.brand-thermia .text-hotwater_temp {
-    position: absolute;
-    left: 72.25%;
-    top: 22.72%;
-    font-family: 'Segoe UI', sans-serif;
-    font-size: 16px;
-    font-weight: bold;
-    color: #0d0d0d;
-    white-space: nowrap;
-}
+.sch-pump-body, .sch-compressor-body { fill: #c8c8c8; stroke: var(--sch-stroke); stroke-width: 2; }
+.sch-pump-hub { fill: var(--sch-stroke); }
+.sch-impeller path, .sch-rotor { fill: none; stroke: var(--sch-stroke); stroke-width: 3; stroke-linecap: round; }
+.sch-pump.active .sch-pump-body, .sch-compressor.active .sch-compressor-body { fill: #b9e8c2; stroke: var(--sch-active); }
+.sch-pump.active .sch-impeller { animation: spin 1.5s linear infinite; }
+.sch-compressor.active .sch-impeller { animation: spin 0.8s linear infinite; }
 
-.brand-thermia .text-radiator_forward_temp {
-    position: absolute;
-    left: 60.50%;
-    top: 53.23%;
-    font-family: 'Segoe UI', sans-serif;
-    font-size: 16px;
-    font-weight: bold;
-    color: #0d0d0d;
-    white-space: nowrap;
-}
+.sch-expansion { fill: #fff; stroke: var(--sch-stroke); stroke-width: 2; stroke-linejoin: round; }
 
-.brand-thermia .text-radiator_return_temp {
-    position: absolute;
-    left: 60.62%;
-    top: 71.05%;
-    font-family: 'Segoe UI', sans-serif;
-    font-size: 16px;
-    font-weight: bold;
-    color: #0d0d0d;
-    white-space: nowrap;
-}
+.sch-heater-body { fill: #c8c8c8; stroke: var(--sch-stroke); stroke-width: 2; }
+.sch-heater-label { font-size: 12px; font-family: monospace; text-anchor: middle; fill: #111; }
+.sch-bolt { fill: none; stroke: var(--sch-stroke); stroke-width: 2; }
+.sch-heater.active .sch-heater-body { fill: #ffe08a; }
+.sch-heater.active .sch-bolt { stroke: #e8590c; stroke-width: 3; animation: sch-pulse 1s ease-in-out infinite; }
 
-/* ===== IVT Brand Styles ===== */
-.brand-ivt .heatpump-display {
-    background-image: url('../assets/schema/BV_main_IVT.png');
-}
+.sch-valve-body { fill: #b9d9bf; stroke: var(--sch-stroke); stroke-width: 2; }
+.sch-arrow { fill: none; stroke: var(--sch-hot); stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
+.sch-valve .sch-arrow-active { display: none; }
+.sch-valve.active .sch-arrow-idle { display: none; }
+.sch-valve.active .sch-arrow-active { display: inline; }
 
-/* IVT overlay positions (adjusted +0.3% left, +0.8% top for alignment) */
-.brand-ivt .overlay-3kw_on {
-    position: absolute;
-    left: 50.80%;
-    top: 27.53%;
-    width: 44px;
-    height: 75px;
-    display: none;
-}
-.brand-ivt .overlay-3kw_on.active {
-    display: block;
-}
+.sch-tank-body { fill: #fff; stroke: #111; stroke-width: 4; }
+.sch-tank-dial { fill: #29a3e8; stroke: #111; stroke-width: 2; }
+.sch-tank-led { fill: #999; }
+.sch-tank.active .sch-tank-body { stroke: var(--sch-hot); }
+.sch-tank.active .sch-tank-led { fill: #f76707; animation: sch-pulse 1.2s ease-in-out infinite; }
 
-.brand-ivt .overlay-BV_komp_anim {
-    position: absolute;
-    left: 23.05%;
-    top: 43.56%;
-    width: 149px;
-    height: 186px;
-    display: none;
-}
-.brand-ivt .overlay-BV_komp_anim.active {
-    display: block;
-}
+.sch-radiator-body { fill: var(--sch-metal); stroke: var(--sch-stroke); stroke-width: 3; }
+.sch-radiator-fin { stroke: var(--sch-stroke); stroke-width: 2; }
+.sch-wave { fill: none; stroke: #111; stroke-width: 2.5; stroke-linecap: round; opacity: 0; }
+.sch-radiator.active .sch-radiator-body { fill: #ffe3e3; }
+.sch-radiator.active .sch-wave { opacity: 1; animation: sch-rise 2s ease-in-out infinite; }
 
-.brand-ivt .overlay-KB_snurr {
-    position: absolute;
-    left: 0.43%;
-    top: 50.02%;
-    width: 55px;
-    height: 55px;
-    display: none;
-}
-.brand-ivt .overlay-KB_snurr.active {
-    display: block;
-    transform-origin: center;
-    animation: spin 2s linear infinite;
-}
+.sch-impeller { transform-box: fill-box; transform-origin: center; }
 
-.brand-ivt .overlay-RAD_pil {
-    position: absolute;
-    left: 72.18%;
-    top: 45.34%;
-    width: 82px;
-    height: 77px;
-    display: none;
-}
-.brand-ivt .overlay-RAD_pil.active {
-    display: block;
-}
+@keyframes sch-pulse { 50% { opacity: 0.4; } }
+@keyframes sch-rise { 0% { transform: translateY(4px); opacity: 0; } 50% { opacity: 1; } 100% { transform: translateY(-4px); opacity: 0; } }
 
-.brand-ivt .overlay-VV_pil {
-    position: absolute;
-    left: 72.18%;
-    top: 45.34%;
-    width: 82px;
-    height: 77px;
-    display: none;
-}
-.brand-ivt .overlay-VV_pil.active {
-    display: block;
-}
-
-.brand-ivt .overlay-RAD_snurr {
-    position: absolute;
-    left: 46.43%;
-    top: 50.47%;
-    width: 56px;
-    height: 56px;
-    display: none;
-}
-.brand-ivt .overlay-RAD_snurr.active {
-    display: block;
-    transform-origin: center;
-    animation: spin 2s linear infinite;
-}
-
-.brand-ivt .overlay-RAD_hot {
-    position: absolute;
-    left: 82.43%;
-    top: 43.78%;
-    width: 139px;
-    height: 162px;
-    display: none;
-}
-.brand-ivt .overlay-RAD_hot.active {
-    display: block;
-}
-
-.brand-ivt .overlay-VB_snurr {
-    position: absolute;
-    left: 46.43%;
-    top: 68.73%;
-    width: 55px;
-    height: 55px;
-    display: none;
-}
-.brand-ivt .overlay-VB_snurr.active {
-    display: block;
-    transform-origin: center;
-    animation: spin 2s linear infinite;
-}
-
-.brand-ivt .overlay-VV_hot {
-    position: absolute;
-    left: 69.30%;
-    top: 14.83%;
-    width: 103px;
-    height: 139px;
-    display: none;
-}
-.brand-ivt .overlay-VV_hot.active {
-    display: block;
-}
-
-/* IVT text positions */
-.brand-ivt .text-outdoor_temp {
-    position: absolute;
-    left: 33.13%;
-    top: 12.25%;
-    font-family: 'Segoe UI', sans-serif;
-    font-size: 16px;
-    font-weight: bold;
-    color: #0d0d0d;
-    white-space: nowrap;
-}
-
-.brand-ivt .text-hotgas_temp {
-    position: absolute;
-    left: 33.88%;
-    top: 20.49%;
-    font-family: 'Segoe UI', sans-serif;
-    font-size: 16px;
-    font-weight: bold;
-    color: #0d0d0d;
-    white-space: nowrap;
-}
-
-.brand-ivt .text-hotwater_temp {
-    position: absolute;
-    left: 72.13%;
-    top: 22.72%;
-    font-family: 'Segoe UI', sans-serif;
-    font-size: 16px;
-    font-weight: bold;
-    color: #0d0d0d;
-    white-space: nowrap;
-}
-
-.brand-ivt .text-KB_in_temp {
-    position: absolute;
-    left: 10.63%;
-    top: 53.23%;
-    font-family: 'Segoe UI', sans-serif;
-    font-size: 16px;
-    font-weight: bold;
-    color: #0d0d0d;
-    white-space: nowrap;
-}
-
-.brand-ivt .text-KB_out_temp {
-    position: absolute;
-    left: 10.75%;
-    top: 71.49%;
-    font-family: 'Segoe UI', sans-serif;
-    font-size: 16px;
-    font-weight: bold;
-    color: #0d0d0d;
-    white-space: nowrap;
-}
-
-.brand-ivt .text-radiator_forward_temp {
-    position: absolute;
-    left: 60.62%;
-    top: 53.23%;
-    font-family: 'Segoe UI', sans-serif;
-    font-size: 16px;
-    font-weight: bold;
-    color: #0d0d0d;
-    white-space: nowrap;
-}
-
-.brand-ivt .text-radiator_return_temp {
-    position: absolute;
-    left: 60.62%;
-    top: 71.05%;
-    font-family: 'Segoe UI', sans-serif;
-    font-size: 16px;
-    font-weight: bold;
-    color: #0d0d0d;
-    white-space: nowrap;
-}
+.sch-grid line { stroke: rgba(0, 0, 0, 0.15); stroke-width: 1; }
+.sch-grid text { font-size: 9px; fill: rgba(0, 0, 0, 0.5); }
+.sch-grid .sch-grid-pos { font-size: 14px; font-weight: 700; text-anchor: end; fill: #d6336c; }
 
 /* ===== Schema Container (legacy support) ===== */
 .schema-container {
@@ -1243,45 +916,9 @@ body {
 }
 
 /* ==================== Responsive Design ==================== */
-@media (max-width: 850px) {
-    .heatpump-display {
-        width: 100%;
-        height: auto;
-        aspect-ratio: 800 / 449;
-    }
-
-    /* Scale text sizes for responsive display */
-    .brand-thermia .text-outdoor_temp,
-    .brand-thermia .text-hotgas_temp,
-    .brand-thermia .text-integral_value,
-    .brand-thermia .text-KB_in_temp,
-    .brand-thermia .text-KB_out_temp,
-    .brand-thermia .text-hotwater_temp,
-    .brand-thermia .text-radiator_forward_temp,
-    .brand-thermia .text-radiator_return_temp,
-    .brand-ivt .text-outdoor_temp,
-    .brand-ivt .text-hotgas_temp,
-    .brand-ivt .text-KB_in_temp,
-    .brand-ivt .text-KB_out_temp,
-    .brand-ivt .text-hotwater_temp,
-    .brand-ivt .text-radiator_forward_temp,
-    .brand-ivt .text-radiator_return_temp {
-        font-size: 12px;
-    }
-}
-
 @media (max-width: 768px) {
     .schema-container {
         padding: 10px;
-    }
-
-    .schema-temp-box {
-        height: 14px !important;
-        line-height: 14px !important;
-        font-size: 0.6rem !important;
-        padding: 0 3px !important;
-        min-width: 35px !important;
-        border-width: 1px !important;
     }
 
     .topbar-quickstats {
@@ -1300,52 +937,5 @@ body {
         font-size: 1.5rem;
     }
 
-    /* Scale text sizes for smaller screens */
-    .brand-thermia .text-outdoor_temp,
-    .brand-thermia .text-hotgas_temp,
-    .brand-thermia .text-integral_value,
-    .brand-thermia .text-KB_in_temp,
-    .brand-thermia .text-KB_out_temp,
-    .brand-thermia .text-hotwater_temp,
-    .brand-thermia .text-radiator_forward_temp,
-    .brand-thermia .text-radiator_return_temp,
-    .brand-ivt .text-outdoor_temp,
-    .brand-ivt .text-hotgas_temp,
-    .brand-ivt .text-KB_in_temp,
-    .brand-ivt .text-KB_out_temp,
-    .brand-ivt .text-hotwater_temp,
-    .brand-ivt .text-radiator_forward_temp,
-    .brand-ivt .text-radiator_return_temp {
-        font-size: 10px;
-    }
 }
 
-@media (max-width: 480px) {
-    .schema-temp-box {
-        height: 11px !important;
-        line-height: 11px !important;
-        font-size: 0.5rem !important;
-        padding: 0 2px !important;
-        min-width: 28px !important;
-        border-width: 1px !important;
-    }
-
-    /* Even smaller text for mobile */
-    .brand-thermia .text-outdoor_temp,
-    .brand-thermia .text-hotgas_temp,
-    .brand-thermia .text-integral_value,
-    .brand-thermia .text-KB_in_temp,
-    .brand-thermia .text-KB_out_temp,
-    .brand-thermia .text-hotwater_temp,
-    .brand-thermia .text-radiator_forward_temp,
-    .brand-thermia .text-radiator_return_temp,
-    .brand-ivt .text-outdoor_temp,
-    .brand-ivt .text-hotgas_temp,
-    .brand-ivt .text-KB_in_temp,
-    .brand-ivt .text-KB_out_temp,
-    .brand-ivt .text-hotwater_temp,
-    .brand-ivt .text-radiator_forward_temp,
-    .brand-ivt .text-radiator_return_temp {
-        font-size: 8px;
-    }
-}
