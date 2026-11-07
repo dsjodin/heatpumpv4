@@ -5,6 +5,11 @@ Modern architecture with ECharts and Socket.IO
 Supports: Thermia, IVT, NIBE
 """
 
+# Must run before anything else is imported: makes InfluxDB I/O cooperative so one slow
+# query doesn't block the whole server, and lets queries run in parallel.
+import eventlet
+eventlet.monkey_patch()
+
 import os
 import sys
 import copy
@@ -23,7 +28,6 @@ BUILD_TIME = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 from influxdb_client.domain.bucket_retention_rules import BucketRetentionRules
 from flask import Flask, render_template, jsonify, request
 from flask_socketio import SocketIO, emit
-import eventlet
 
 # Add parent directory to path for provider imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -611,42 +615,28 @@ def get_all_metrics_debug():
         return jsonify({'error': str(e), 'metrics': [], 'traceback': str(e)}), 500
 
 
+# Metrics shown with min/max/avg in the status panels
+MINMAX_METRICS = [
+    'outdoor_temp', 'indoor_temp', 'hot_water_top', 'brine_in_evaporator', 'brine_out_condenser',
+    'radiator_forward', 'radiator_return', 'heat_carrier_forward', 'heat_carrier_return',
+]
+
+
 def fetch_all_data_batch(time_range):
-    """Fetch all dashboard data: batch, viz-wide, hot water, runtime, min/max and latest queries."""
+    """Fetch all dashboard data. The independent InfluxDB queries run in parallel."""
     start_time = time.time()
 
-    # List ALL metrics we need (including alarm/status for events)
+    # Batch metrics (also reused for runtime, energy, alarms and events)
     all_metrics = [
         'outdoor_temp', 'indoor_temp', 'radiator_forward', 'radiator_return',
         'heat_carrier_forward', 'heat_carrier_return',  # IVT alternative for radiator temps
         'hot_water_top', 'brine_in_evaporator', 'brine_out_condenser',
         'compressor_status', 'power_consumption', 'additional_heat_percent',
         'switch_valve_status', 'brine_pump_status', 'radiator_pump_status',
-        'alarm_status', 'alarm_code'  # Added for alarm/event detection
+        'alarm_status', 'alarm_code'
     ]
 
-    # ONE query to get everything
-    logger.info(f"📊 Batch fetching {len(all_metrics)} metrics for {time_range}")
-    query_start = time.time()
-    df = data_query.query_metrics(all_metrics, time_range)
-    query_elapsed = time.time() - query_start
-    logger.info(f"  ⏱️  InfluxDB query took {query_elapsed:.2f}s")
-
-    # Process the data in parallel (much faster than separate queries)
-    process_start = time.time()
-
-    # OPTIMIZATION: Calculate runtime once and reuse (used by runtime, sankey, and kpi)
-    logger.info(f"  📊 Pre-calculating runtime stats (used by 3 tasks)...")
-    runtime_cache_start = time.time()
-    cached_runtime_stats = data_query.calculate_runtime_stats(time_range)
-    runtime_cache_elapsed = time.time() - runtime_cache_start
-    logger.info(f"    ⏱️  Runtime calculation took {runtime_cache_elapsed:.2f}s")
-
-    # OPTIMIZATION: Query visualization metrics with fine aggregation for aligned charts
-    # Temperature, COP, and Performance charts need same data points for alignment
-    # Using InfluxDB-side pivot for better performance (no pandas pivot needed)
-    logger.info(f"  📊 Fetching visualization metrics with InfluxDB-side pivot...")
-    viz_query_start = time.time()
+    # Temperature, COP and performance charts need aligned timestamps: InfluxDB-side pivot
     viz_metrics = [
         'outdoor_temp', 'indoor_temp', 'radiator_forward', 'radiator_return',
         'heat_carrier_forward', 'heat_carrier_return',  # IVT alternative for radiator temps
@@ -657,63 +647,36 @@ def fetch_all_data_batch(time_range):
     ]
     viz_aggregation = data_query._get_cop_aggregation_window(time_range)
 
-    # Use InfluxDB-side pivot - returns wide format directly
-    # Since HTTP API delivers all sensors with synchronized timestamps,
-    # no pandas pivot or ffill needed
-    viz_df_pivot = data_query.query_metrics_wide(viz_metrics, time_range, aggregation_window=viz_aggregation)
-    viz_query_elapsed = time.time() - viz_query_start
-    logger.info(f"    ⏱️  Visualization query (with pivot) took {viz_query_elapsed:.2f}s ({viz_aggregation} aggregation, {len(viz_df_pivot)} rows)")
-
-    # Pre-calculate COP from pivoted data (aligned timestamps guaranteed)
-    logger.info(f"  📊 Pre-calculating COP from pivoted data...")
-    cop_cache_start = time.time()
-    cached_cop_df = data_query.calculate_cop_from_pivot(viz_df_pivot)
-    cop_cache_elapsed = time.time() - cop_cache_start
-    logger.info(f"    ⏱️  COP calculation took {cop_cache_elapsed:.2f}s")
-
     # Hot water cycles need fine-grained data (coarse buckets hide short cycles).
     # Short ranges are widened to 7d so cycles/day is meaningful.
-    hw_cache_start = time.time()
     hw_range = '7d' if time_range in ('1h', '6h', '24h') else time_range
     hw_window = '1m' if hw_range == '7d' else '5m'
-    hw_df = data_query.query_metrics(['switch_valve_status', 'power_consumption'], hw_range, aggregation_window=hw_window)
-    cached_hot_water_stats = data_query.analyze_hot_water_cycles_from_df(hw_df, hw_range)
-    hw_cache_elapsed = time.time() - hw_cache_start
-    logger.info(f"    ⏱️  Hot water analysis took {hw_cache_elapsed:.2f}s")
 
-    # FIX: Get min/max/avg directly from DB using min()/max()/mean() on RAW data
-    # The batch data uses aggregateWindow(fn: mean) which corrupts min/max values
-    # For Thermia H66, even min/max should end in .0 (e.g., 33.0, not 31.9)
-    logger.info(f"  📊 Fetching min/max/avg directly from DB (avoids mean aggregation bug)...")
-    minmax_cache_start = time.time()
-    cached_min_max = data_query.get_min_max_values(time_range)  # Uses |> min(), |> max(), |> mean() on raw data
-    minmax_cache_elapsed = time.time() - minmax_cache_start
-    logger.info(f"    ⏱️  Min/max query took {minmax_cache_elapsed:.2f}s")
+    # min/max/avg and latest come from raw data (aggregateWindow(mean) would distort them)
+    queries = {
+        'batch': lambda: data_query.query_metrics(all_metrics, time_range),
+        'viz': lambda: data_query.query_metrics_wide(viz_metrics, time_range, aggregation_window=viz_aggregation),
+        'hot_water': lambda: data_query.query_metrics(['switch_valve_status', 'power_consumption'], hw_range, aggregation_window=hw_window),
+        'min': lambda: data_query.get_stat_values('min', time_range, MINMAX_METRICS),
+        'max': lambda: data_query.get_stat_values('max', time_range, MINMAX_METRICS),
+        'mean': lambda: data_query.get_stat_values('mean', time_range, MINMAX_METRICS),
+        'latest': lambda: data_query.get_latest_values(),
+    }
+    pool = eventlet.GreenPool(len(queries))
+    threads = {k: pool.spawn(fn) for k, fn in queries.items()}
+    results = {k: t.wait() for k, t in threads.items()}
+    query_elapsed = time.time() - start_time
 
-    # FIX: Get latest values directly from DB using last() - NOT from aggregated batch data
-    # The batch data uses aggregateWindow(fn: mean) which causes averaged values
-    # For Thermia H66, temperatures must always end in .0 (e.g., 33.0, not 31.9)
-    logger.info(f"  📊 Fetching latest values directly from DB (avoids mean aggregation bug)...")
-    latest_cache_start = time.time()
-    cached_latest_values = data_query.get_latest_values()  # Uses |> last() - actual raw values
-    latest_cache_elapsed = time.time() - latest_cache_start
-    logger.info(f"    ⏱️  Latest values query took {latest_cache_elapsed:.2f}s")
-
-    # OPTIMIZATION: Get alarm status from batch data (eliminates 1-2 DB queries)
-    logger.info(f"  📊 Pre-calculating alarm status from batch data (used by status task)...")
-    alarm_cache_start = time.time()
+    df = results['batch']
+    cached_min_max = data_query.combine_min_max(results['min'], results['max'], results['mean'])
+    viz_df_pivot = results['viz']
+    cached_cop_df = data_query.calculate_cop_from_pivot(viz_df_pivot)
+    cached_runtime_stats = data_query.calculate_runtime_stats(time_range, df=df)
+    cached_hot_water_stats = data_query.analyze_hot_water_cycles_from_df(results['hot_water'], hw_range)
     cached_alarm_status = data_query.get_alarm_status_from_df(df)
-    alarm_cache_elapsed = time.time() - alarm_cache_start
-    logger.info(f"    ⏱️  Alarm status calculation took {alarm_cache_elapsed:.2f}s")
-
-    # OPTIMIZATION: Get event log from batch data (eliminates 6 separate DB queries ~2s)
-    logger.info(f"  📊 Pre-calculating event log from batch data (used by events task)...")
-    events_cache_start = time.time()
     cached_events = data_query.get_event_log_from_df(df, limit=20)
-    events_cache_elapsed = time.time() - events_cache_start
-    logger.info(f"    ⏱️  Event log calculation took {events_cache_elapsed:.2f}s")
-
     price_per_kwh = load_config().get('electricity_price', 2.0)
+    energy_costs = data_query.calculate_energy_costs(time_range, price_per_kwh, df=df)
 
     data = {
         'cop': get_cop_data_from_pivot(cached_cop_df),
@@ -723,13 +686,10 @@ def fetch_all_data_batch(time_range):
         'performance': get_performance_data_from_pivot(viz_df_pivot),
         'power': get_power_data_from_df(df),
         'valve': get_valve_data_from_df(df),
-        'status': get_status_data_fully_cached(cached_cop_df, cached_min_max, cached_latest_values, cached_alarm_status),
+        'status': get_status_data_fully_cached(cached_cop_df, cached_min_max, results['latest'], cached_alarm_status),
         'events': get_event_log_cached(cached_events),
-        'kpi': get_kpi_data_cached(time_range, cached_runtime_stats, cached_hot_water_stats, price_per_kwh),
+        'kpi': get_kpi_data_cached(cached_runtime_stats, cached_hot_water_stats, energy_costs),
     }
-
-    process_elapsed = time.time() - process_start
-    logger.info(f"  ⏱️  Data processing took {process_elapsed:.2f}s")
 
     data['config'] = {
         'brand': provider.get_brand_name(),
@@ -738,9 +698,27 @@ def fetch_all_data_batch(time_range):
     }
 
     elapsed = time.time() - start_time
-    logger.info(f"⚡⚡ BATCH fetch completed in {elapsed:.2f}s (range: {time_range})")
-
+    logger.info(f"⚡ Fetch {time_range}: {elapsed:.2f}s (queries {query_elapsed:.2f}s in parallel, "
+                f"processing {elapsed - query_elapsed:.2f}s)")
     return data
+
+
+# Shared result per time range, so clients and the background loop don't recompute the same data
+_dashboard_cache = {}
+_dashboard_locks = {}
+
+
+def get_dashboard_data(time_range):
+    """Cached fetch_all_data_batch. Concurrent callers for the same range share one computation."""
+    max_age = max(load_config().get('dashboard', {}).get('refresh_interval', 30) - 5, 5)
+    lock = _dashboard_locks.setdefault(time_range, eventlet.semaphore.Semaphore())
+    with lock:
+        cached = _dashboard_cache.get(time_range)
+        if cached and time.time() - cached[0] < max_age:
+            return cached[1]
+        data = clean_nan_values(fetch_all_data_batch(time_range))
+        _dashboard_cache[time_range] = (time.time(), data)
+        return data
 
 
 # Helper functions to extract data from pre-pivoted dataframe
@@ -1080,11 +1058,8 @@ def get_initial_data():
 
     try:
         logger.info(f"📥 Loading initial data for range: {time_range}")
-        data = fetch_all_data_batch(time_range)
+        data = get_dashboard_data(time_range)
 
-        logger.info(f"✅ Initial data loaded successfully")
-        # Clean NaN values before JSON serialization
-        data = clean_nan_values(data)
         return jsonify(data)
 
     except Exception as e:
@@ -1265,12 +1240,9 @@ def get_status_data_fully_cached(cached_cop_df, cached_min_max, cached_latest_va
         }
 
 
-def get_kpi_data_cached(time_range, cached_runtime_stats, cached_hot_water_stats, price_per_kwh=2.0):
-    """Get extended KPI metrics using pre-calculated runtime and hot water stats (avoids redundant InfluxDB queries)"""
+def get_kpi_data_cached(cached_runtime_stats, cached_hot_water_stats, energy_costs):
+    """Get extended KPI metrics from pre-calculated runtime, hot water and energy stats"""
     try:
-        # Calculate energy costs
-        energy_costs = data_query.calculate_energy_costs(time_range, price_per_kwh)
-
         kpi = {
             'energy': {
                 'total_kwh': energy_costs.get('total_kwh', 0),
@@ -1356,10 +1328,7 @@ def handle_time_range_change(data):
 
     # Send updated data immediately to this client using parallel fetching
     try:
-        update_data = fetch_all_data_batch(time_range)
-        update_data['timestamp'] = datetime.now().isoformat()
-
-        update_data = clean_nan_values(update_data)
+        update_data = dict(get_dashboard_data(time_range), timestamp=datetime.now().isoformat())
         emit('graph_update', update_data)
         logger.info(f"✅ Sent updated data to client {client_id}")
 
@@ -1381,10 +1350,7 @@ def handle_manual_update(data):
     logger.info(f"🔄 Client {client_id} requested manual update")
 
     try:
-        update_data = fetch_all_data_batch(time_range)
-        update_data['timestamp'] = datetime.now().isoformat()
-
-        update_data = clean_nan_values(update_data)
+        update_data = dict(get_dashboard_data(time_range), timestamp=datetime.now().isoformat())
         emit('graph_update', update_data)
 
     except Exception as e:
@@ -1395,43 +1361,32 @@ def handle_manual_update(data):
 # ==================== Background Tasks ====================
 
 def background_updates():
-    """Background task to push updates every 30 seconds to each client individually - PARALLELIZED"""
+    """Compute once per distinct time range and push to every client using it.
+    The default range is kept warm even without clients so the first page load is instant."""
     logger.info("🔄 Background update task started")
 
     while True:
         try:
-            eventlet.sleep(load_config().get('dashboard', {}).get('refresh_interval', 30))
-
-            if not connected_clients:
-                continue
-
-            logger.info(f"📊 Pushing individualized updates to {len(connected_clients)} clients...")
-
-            # Send individualized updates to each client based on their time_range preference
+            ranges = {}
             for client_id, client_info in list(connected_clients.items()):
+                ranges.setdefault(client_info.get('time_range', '24h'), []).append(client_id)
+            ranges.setdefault('24h', [])
+
+            for time_range, client_ids in ranges.items():
                 try:
-                    time_range = client_info.get('time_range', '24h')
-
-                    logger.debug(f"Sending update to {client_id} with range: {time_range}")
-
-                    # Use parallel fetching for much faster updates
-                    update_data = fetch_all_data_batch(time_range)
-                    update_data['timestamp'] = datetime.now().isoformat()
-                    update_data['time_range'] = time_range  # Include time range in response
-
-                    # Clean NaN values and send to specific client
-                    update_data = clean_nan_values(update_data)
-                    socketio.emit('graph_update', update_data, room=client_id)
-
-                except Exception as client_error:
-                    logger.error(f"❌ Error sending update to client {client_id}: {client_error}")
+                    data = get_dashboard_data(time_range)
+                except Exception as e:
+                    logger.error(f"❌ Background fetch failed for {time_range}: {e}")
                     continue
-
-            logger.info(f"✅ Updates pushed at {datetime.now().strftime('%H:%M:%S')}")
-
+                if not client_ids:
+                    continue
+                update_data = dict(data, timestamp=datetime.now().isoformat(), time_range=time_range)
+                for client_id in client_ids:
+                    socketio.emit('graph_update', update_data, room=client_id)
         except Exception as e:
             logger.error(f"❌ Error in background update: {e}")
-            eventlet.sleep(5)  # Wait a bit before retrying
+
+        eventlet.sleep(load_config().get('dashboard', {}).get('refresh_interval', 30))
 
 
 # ==================== Main ====================
@@ -1447,6 +1402,9 @@ if __name__ == '__main__':
     logger.info("📈 Charts: ECharts 5.4+")
     logger.info("🌐 Dashboard will be available at http://localhost:8050")
     logger.info("=" * 60)
+
+    socketio.background_task_started = True
+    socketio.start_background_task(background_updates)
 
     socketio.run(
         app,
