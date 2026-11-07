@@ -626,7 +626,8 @@ MINMAX_METRICS = [
 
 
 def fetch_all_data_batch(time_range):
-    """Fetch all dashboard data. The independent InfluxDB queries run in parallel."""
+    """Fetch the range-dependent ("heavy") dashboard data; the independent queries run in parallel.
+    Returns the payload without 'status' plus what get_live_status() needs to build it."""
     start_time = time.time()
 
     # Batch metrics (also reused for runtime, energy, alarms and events)
@@ -655,7 +656,7 @@ def fetch_all_data_batch(time_range):
     hw_range = '7d' if time_range in ('1h', '6h', '24h') else time_range
     hw_window = '1m' if hw_range == '7d' else '5m'
 
-    # min/max/avg and latest come from raw data (aggregateWindow(mean) would distort them)
+    # min/max/avg come from raw data (aggregateWindow(mean) would distort them)
     queries = {
         'batch': lambda: data_query.query_metrics(all_metrics, time_range),
         'viz': lambda: data_query.query_metrics_wide(viz_metrics, time_range, aggregation_window=viz_aggregation),
@@ -663,10 +664,17 @@ def fetch_all_data_batch(time_range):
         'min': lambda: data_query.get_stat_values('min', time_range, MINMAX_METRICS),
         'max': lambda: data_query.get_stat_values('max', time_range, MINMAX_METRICS),
         'mean': lambda: data_query.get_stat_values('mean', time_range, MINMAX_METRICS),
-        'latest': lambda: data_query.get_latest_values(),
     }
+    timings = {}
+
+    def timed(key):
+        t0 = time.time()
+        result = queries[key]()
+        timings[key] = time.time() - t0
+        return result
+
     pool = eventlet.GreenPool(len(queries))
-    threads = {k: pool.spawn(fn) for k, fn in queries.items()}
+    threads = {k: pool.spawn(timed, k) for k in queries}
     results = {k: t.wait() for k, t in threads.items()}
     query_elapsed = time.time() - start_time
 
@@ -689,7 +697,6 @@ def fetch_all_data_batch(time_range):
         'performance': get_performance_data_from_pivot(viz_df_pivot),
         'power': get_power_data_from_df(df),
         'valve': get_valve_data_from_df(df),
-        'status': get_status_data_fully_cached(cached_cop_df, cached_min_max, results['latest'], cached_alarm_status),
         'events': get_event_log_cached(cached_events),
         'kpi': get_kpi_data_cached(cached_runtime_stats, cached_hot_water_stats, energy_costs),
     }
@@ -701,27 +708,51 @@ def fetch_all_data_batch(time_range):
     }
 
     elapsed = time.time() - start_time
-    logger.info(f"⚡ Fetch {time_range}: {elapsed:.2f}s (queries {query_elapsed:.2f}s in parallel, "
+    per_query = ', '.join(f'{k} {v:.2f}' for k, v in timings.items())
+    logger.info(f"⚡ Fetch {time_range}: {elapsed:.2f}s (queries in parallel: {per_query}; "
                 f"processing {elapsed - query_elapsed:.2f}s)")
-    return data
+    return {'data': clean_nan_values(data), 'cop_df': cached_cop_df,
+            'min_max': cached_min_max, 'alarm': cached_alarm_status}
 
 
-# Shared result per time range, so clients and the background loop don't recompute the same data
+# Shared results so clients and the background loop don't recompute the same data.
+# Range data is cached longer for long ranges; latest values (status panel, live schema)
+# are shared by all ranges and always follow the refresh interval.
 _dashboard_cache = {}
-_dashboard_locks = {}
+_latest_cache = {}
+_locks = {}
+WARM_RANGES = ['24h', '7d', '30d']
+
+
+def _refresh_age():
+    return max(load_config().get('dashboard', {}).get('refresh_interval', 30) - 5, 5)
+
+
+def _range_max_age(time_range):
+    hours = int(time_range[:-1]) * (24 if time_range.endswith('d') else 1)
+    if hours <= 24:
+        return _refresh_age()
+    return 120 if hours <= 7 * 24 else 300
+
+
+def _cached(cache, key, max_age, compute):
+    """Return cache[key] if younger than max_age, else compute it. One computation per key at a time."""
+    with _locks.setdefault((id(cache), key), eventlet.semaphore.Semaphore()):
+        hit = cache.get(key)
+        if hit and time.time() - hit[0] < max_age:
+            return hit[1]
+        value = compute()
+        cache[key] = (time.time(), value)
+        return value
 
 
 def get_dashboard_data(time_range):
-    """Cached fetch_all_data_batch. Concurrent callers for the same range share one computation."""
-    max_age = max(load_config().get('dashboard', {}).get('refresh_interval', 30) - 5, 5)
-    lock = _dashboard_locks.setdefault(time_range, eventlet.semaphore.Semaphore())
-    with lock:
-        cached = _dashboard_cache.get(time_range)
-        if cached and time.time() - cached[0] < max_age:
-            return cached[1]
-        data = clean_nan_values(fetch_all_data_batch(time_range))
-        _dashboard_cache[time_range] = (time.time(), data)
-        return data
+    latest_thread = eventlet.spawn(_cached, _latest_cache, 'latest', _refresh_age(), data_query.get_latest_values)
+    heavy = _cached(_dashboard_cache, time_range, _range_max_age(time_range),
+                    lambda: fetch_all_data_batch(time_range))
+    latest = latest_thread.wait()
+    status = get_status_data_fully_cached(heavy['cop_df'], heavy['min_max'], latest, heavy['alarm'])
+    return dict(heavy['data'], status=clean_nan_values(status))
 
 
 # Helper functions to extract data from pre-pivoted dataframe
@@ -1365,7 +1396,7 @@ def handle_manual_update(data):
 
 def background_updates():
     """Compute once per distinct time range and push to every client using it.
-    The default range is kept warm even without clients so the first page load is instant."""
+    WARM_RANGES are kept warm even without clients so the page and range switches are instant."""
     logger.info("🔄 Background update task started")
 
     while True:
@@ -1373,7 +1404,8 @@ def background_updates():
             ranges = {}
             for client_id, client_info in list(connected_clients.items()):
                 ranges.setdefault(client_info.get('time_range', '24h'), []).append(client_id)
-            ranges.setdefault('24h', [])
+            for warm in WARM_RANGES:
+                ranges.setdefault(warm, [])
 
             for time_range, client_ids in ranges.items():
                 try:
