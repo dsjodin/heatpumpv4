@@ -19,6 +19,7 @@ import logging
 import yaml
 import warnings
 from typing import List, Dict, Any, Optional
+import eventlet
 import pandas as pd
 import numpy as np
 from influxdb_client import InfluxDBClient
@@ -142,41 +143,29 @@ class HeatPumpDataQuery:
             if aggregation_window is None:
                 aggregation_window = self._get_aggregation_window(time_range)
 
-            results = []
-
-            # Query value metrics with mean aggregation
-            if value_metrics:
-                name_filter = ' or '.join([f'r.name == "{name}"' for name in value_metrics])
-                query = f'''
+            # Value metrics with mean, status metrics with last (preserves 0/1 values).
+            # The two queries are independent, so they run in parallel.
+            queries = []
+            for names, fn in ((value_metrics, 'mean'), (status_metrics, 'last')):
+                if not names:
+                    continue
+                name_filter = ' or '.join([f'r.name == "{name}"' for name in names])
+                queries.append(f'''
                     from(bucket: "{self.bucket}")
                         |> range(start: -{time_range})
                         |> filter(fn: (r) => r._measurement == "heatpump")
                         |> filter(fn: (r) => {name_filter})
-                        |> aggregateWindow(every: {aggregation_window}, fn: mean, createEmpty: false)
-                        |> yield(name: "mean")
-                '''
-                result = self.query_api.query_data_frame(query)
-                if isinstance(result, list):
-                    result = pd.concat(result, ignore_index=True)
-                if not result.empty:
-                    results.append(result)
+                        |> aggregateWindow(every: {aggregation_window}, fn: {fn}, createEmpty: false)
+                        |> yield(name: "{fn}")
+                ''')
 
-            # Query status metrics with last aggregation (preserves 0/1 values)
-            if status_metrics:
-                name_filter = ' or '.join([f'r.name == "{name}"' for name in status_metrics])
-                query = f'''
-                    from(bucket: "{self.bucket}")
-                        |> range(start: -{time_range})
-                        |> filter(fn: (r) => r._measurement == "heatpump")
-                        |> filter(fn: (r) => {name_filter})
-                        |> aggregateWindow(every: {aggregation_window}, fn: last, createEmpty: false)
-                        |> yield(name: "last")
-                '''
+            def run(query):
                 result = self.query_api.query_data_frame(query)
                 if isinstance(result, list):
                     result = pd.concat(result, ignore_index=True)
-                if not result.empty:
-                    results.append(result)
+                return result
+
+            results = [r for r in eventlet.GreenPool(len(queries) or 1).imap(run, queries) if not r.empty]
 
             logger.debug(f"Querying metrics with {aggregation_window} aggregation for {time_range}")
 

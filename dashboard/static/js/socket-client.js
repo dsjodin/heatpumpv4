@@ -48,14 +48,30 @@ socket.on('connect_error', (error) => {
 // ==================== Data Update Handlers ====================
 
 socket.on('graph_update', (data) => {
+    // Background push for a range the user just left: ignore
+    if (data.time_range && data.time_range !== currentTimeRange) return;
     console.log('📊 Received graph update');
     latestData = data;
     updateAllUI(data);
+    setLoading(false);
 });
 
 socket.on('error', (data) => {
     console.error('❌ Server error:', data.message);
+    setLoading(false);
 });
+
+// Spinner next to the time range selector + overlay on the chart while loading
+let loadingTimer = null;
+function setLoading(on) {
+    const select = document.getElementById('time-range');
+    const spinner = document.getElementById('range-loading');
+    if (select) select.disabled = on;
+    if (spinner) spinner.classList.toggle('d-none', !on);
+    if (window.setChartLoading) window.setChartLoading(on);
+    clearTimeout(loadingTimer);
+    if (on) loadingTimer = setTimeout(() => setLoading(false), 60000);  // never spin forever
+}
 
 // ==================== HTTP Data Loading ====================
 
@@ -72,6 +88,8 @@ async function loadInitialData(timeRange) {
 
     } catch (error) {
         console.error('❌ Failed to load initial data:', error);
+    } finally {
+        setLoading(false);
     }
 }
 
@@ -403,6 +421,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (window.resetZoomState) {
                 window.resetZoomState();
             }
+            setLoading(true);
             if (connected) {
                 socket.emit('change_time_range', { range: currentTimeRange });
             } else {
@@ -416,6 +435,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (refreshButton) {
         refreshButton.addEventListener('click', () => {
             console.log('🔄 Manual refresh');
+            setLoading(true);
             if (connected) {
                 socket.emit('request_update', { range: currentTimeRange });
             } else {
