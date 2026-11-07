@@ -21,7 +21,7 @@ import time
 import logging
 import requests
 import yaml
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Any, Optional
 
 from influxdb_client import InfluxDBClient, Point
@@ -38,6 +38,17 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+
+def load_config() -> dict:
+    try:
+        with open('/app/config.yaml', 'r') as f:
+            return yaml.safe_load(f) or {}
+    except FileNotFoundError:
+        return {}
+    except Exception as e:
+        logger.warning(f"Could not read config.yaml: {e}")
+        return {}
 
 
 def load_brand_from_config() -> str:
@@ -146,7 +157,10 @@ class HeatPumpAPICollector:
                     continue
 
                 # Store all values as integers (raw from API)
-                processed_data[register_id_upper] = int(raw_value)
+                try:
+                    processed_data[register_id_upper] = int(raw_value)
+                except (TypeError, ValueError):
+                    logger.debug(f"Skipping non-numeric register {register_id_upper}={raw_value!r}")
 
             return processed_data
 
@@ -224,7 +238,7 @@ class HeatPumpAPICollector:
         """
         try:
             # Single timestamp for ALL values - perfect synchronization!
-            timestamp = datetime.utcnow()
+            timestamp = datetime.now(timezone.utc)
 
             # Fetch all data from API in one request
             data = self.fetch_all_data()
@@ -278,7 +292,8 @@ def main():
     """Entry point for API collector"""
     # Get configuration from environment
     h66_ip = os.getenv('H66_IP')
-    interval = int(os.getenv('COLLECTION_INTERVAL', '30'))
+    # config.yaml (editable in the dashboard) wins over the env var
+    interval = int(load_config().get('collection', {}).get('interval_seconds') or os.getenv('COLLECTION_INTERVAL', '30'))
 
     if not h66_ip:
         logger.error("H66_IP environment variable must be set")

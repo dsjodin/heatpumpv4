@@ -619,15 +619,20 @@ async function saveSettings() {
         if (result.success) {
             let msg = '<i class="fas fa-check me-2"></i>Inställningar sparade!';
 
-            if (result.needs_restart && result.needs_restart.length > 0) {
-                const services = result.needs_restart.join(', ');
-                msg += `<br><br>Ändringar kräver omstart av: <strong>${services}</strong>`;
-                msg += `<br><button class="btn btn-warning btn-sm mt-2" onclick="restartServices(${JSON.stringify(result.needs_restart)})">`;
-                msg += '<i class="fas fa-sync-alt me-1"></i>Starta om nu</button>';
+            const needsRestart = result.needs_restart || [];
+            if (needsRestart.length > 0) {
+                msg += `<br><br>Ändringar kräver omstart av: <strong>${needsRestart.join(', ')}</strong><br>`;
             }
 
             alertEl.className = 'alert alert-success';
             alertEl.innerHTML = msg;
+            if (needsRestart.length > 0) {
+                const restartBtn = document.createElement('button');
+                restartBtn.className = 'btn btn-warning btn-sm mt-2';
+                restartBtn.innerHTML = '<i class="fas fa-sync-alt me-1"></i>Starta om nu';
+                restartBtn.addEventListener('click', () => restartServices(needsRestart));
+                alertEl.appendChild(restartBtn);
+            }
             alertEl.classList.remove('d-none');
 
             // Reload settings to reflect actual state
