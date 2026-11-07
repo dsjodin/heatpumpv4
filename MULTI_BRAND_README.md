@@ -330,7 +330,8 @@ live-vyn och visar live-värden från databasen.
 - Klicka för att välja, dra för att flytta (snäpper 5 px, Shift = fritt), piltangenter 1 px (Shift 10 px)
 - Valt rör visar handtag för varje punkt; punkter läggs till/tas bort i panelen
 - Vald komponent har en liten fyrkant för storlek (Shift = behåll proportioner); rörbredd i panelen eller under Layout
-- `Register`, `Aktiv när` och `Flöde när` föreslår registernamn och visar aktuellt värde/PÅ/AV
+- Klick i `Register`, `Aktiv när` eller `Flöde när` öppnar en lista med alla register, beskrivning och
+  live-värde (register med värde överst). Skriv för att filtrera, piltangenter + Enter eller klick för att välja
 - `Kopiera från` hämtar ett annat märkes layout som startpunkt
 - `Visa allt aktivt` tänder alla animationer
 - Ctrl+Z ångra, Ctrl+D duplicera, Delete ta bort, Esc avmarkera

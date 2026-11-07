@@ -49,6 +49,7 @@
     let layout = null;
     let sel = null;          // { kind: 'pipe'|'component', idx }
     let latest = {};
+    let registers = [];
     let undoStack = [];
     let dirty = false;
     let drag = null;
@@ -169,10 +170,96 @@
         } else {
             i.type = type;
         }
-        if (opts.list) i.setAttribute('list', opts.list);
+        if (opts.list) attachRegisterPicker(i);
         i.value = value ?? '';
         i.addEventListener('change', () => onChange(i.value, i));
         return i;
+    }
+
+    // ---------- register picker: all registers with description and live value ----------
+
+    const picker = document.createElement('div');
+    picker.className = 'sed-picker';
+    picker.hidden = true;
+    document.body.append(picker);
+    let pickerInput = null;
+    let pickerRows = [];
+    let pickerActive = -1;
+
+    function formatLive(r) {
+        const v = latest[r.name];
+        if (v === undefined || v === null) return '--';
+        return (typeof v === 'number' ? +v.toFixed(2) : v) + (r.unit ? ' ' + r.unit : '');
+    }
+
+    function choose(name) {
+        const i = pickerInput;
+        closePicker();
+        i.value = name;
+        i.dispatchEvent(new Event('change'));
+    }
+
+    function highlight(k) {
+        pickerRows.forEach((row, n) => row.classList.toggle('active', n === k));
+        pickerActive = k;
+        if (pickerRows[k]) pickerRows[k].scrollIntoView({ block: 'nearest' });
+    }
+
+    function openPicker(i) {
+        pickerInput = i;
+        const q = i.value.trim().toLowerCase();
+        // JSON conditions are typed by hand
+        if (q.startsWith('{')) return closePicker();
+        // Registers that report a live value first, then alphabetical
+        const hits = registers
+            .filter(r => !q || r.name.toLowerCase().includes(q) || r.description.toLowerCase().includes(q))
+            .sort((a, b) => (b.name in latest) - (a.name in latest) || a.name.localeCompare(b.name));
+        picker.innerHTML = '';
+        pickerRows = hits.map(r => {
+            const row = document.createElement('div');
+            row.className = 'sed-pick-row' + (r.name in latest ? '' : ' nodata');
+            const name = document.createElement('code');
+            name.textContent = r.name;
+            const desc = document.createElement('span');
+            desc.className = 'sed-pick-desc';
+            desc.textContent = r.description;
+            const val = document.createElement('span');
+            val.className = 'sed-pick-val';
+            val.textContent = formatLive(r);
+            row.append(name, val, desc);
+            row.addEventListener('mousedown', e => { e.preventDefault(); choose(r.name); });
+            picker.append(row);
+            return row;
+        });
+        if (!hits.length) picker.textContent = 'Inga register matchar';
+        const b = i.getBoundingClientRect();
+        const width = Math.min(Math.max(b.width, 460), window.innerWidth - 16);
+        picker.style.width = width + 'px';
+        picker.style.left = Math.max(8, Math.min(b.left, window.innerWidth - width - 8)) + 'px';
+        picker.hidden = false;
+        const below = window.innerHeight - b.bottom;
+        picker.style.maxHeight = Math.max(below, b.top) - 16 + 'px';
+        picker.style.top = (below >= 200 || below >= b.top ? b.bottom + 2 : Math.max(8, b.top - picker.offsetHeight - 2)) + 'px';
+        highlight(-1);
+    }
+
+    function closePicker() {
+        picker.hidden = true;
+        pickerInput = null;
+    }
+
+    function attachRegisterPicker(i) {
+        i.autocomplete = 'off';
+        i.addEventListener('focus', () => openPicker(i));
+        i.addEventListener('input', () => openPicker(i));
+        i.addEventListener('blur', () => { if (pickerInput === i) closePicker(); });
+        i.addEventListener('keydown', e => {
+            if (picker.hidden || pickerInput !== i) return;
+            if (e.key === 'ArrowDown') { e.preventDefault(); highlight(Math.min(pickerActive + 1, pickerRows.length - 1)); }
+            else if (e.key === 'ArrowUp') { e.preventDefault(); highlight(Math.max(pickerActive - 1, 0)); }
+            else if (e.key === 'Enter' && pickerActive >= 0) { e.preventDefault(); pickerRows[pickerActive].dispatchEvent(new MouseEvent('mousedown')); }
+            else if (e.key === 'Escape') { e.preventDefault(); closePicker(); }
+        });
     }
 
     function setKey(obj, key, value) {
@@ -576,11 +663,9 @@
     }
 
     async function loadRegisters() {
-        const list = $('sed-registers');
-        list.innerHTML = '';
+        registers = [];
         try {
-            const regs = await api(`/api/registers/${brand}`);
-            regs.forEach(r => list.append(new Option(`${r.description} ${r.unit ? '(' + r.unit + ')' : ''}`, r.name)));
+            registers = await api(`/api/registers/${brand}`);
         } catch (e) {
             status(e.message, false);
         }
