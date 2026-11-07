@@ -90,9 +90,16 @@
             const r = c.r || 26;
             const p = el('g', { class: 'sch-compressor', transform: `translate(${c.x},${c.y})` }, g);
             el('circle', { r, class: 'sch-compressor-body' }, p);
+            // Point-symmetric rotor (looks the same after half a turn) so it doesn't appear to wobble
             const rotor = el('g', { class: 'sch-impeller' }, p);
-            el('path', { d: `M${-r * 0.6},0 A${r * 0.6},${r * 0.6} 0 0 1 ${r * 0.6},0`, class: 'sch-rotor' }, rotor);
-            el('path', { d: `M${r * 0.3},0 A${r * 0.3},${r * 0.3} 0 0 1 ${-r * 0.3},0`, class: 'sch-rotor' }, rotor);
+            const arc = (rad, from, to) => {
+                const pt = a => `${(rad * Math.cos(a * Math.PI / 180)).toFixed(2)},${(rad * Math.sin(a * Math.PI / 180)).toFixed(2)}`;
+                return `M${pt(from)} A${rad},${rad} 0 0 1 ${pt(to)}`;
+            };
+            [0, 180].forEach(a => {
+                el('path', { d: arc(r * 0.62, a + 200, a + 320), class: 'sch-rotor' }, rotor);
+                el('path', { d: arc(r * 0.3, a + 290, a + 410), class: 'sch-rotor' }, rotor);
+            });
             bindActive(p, c.active);
         },
 

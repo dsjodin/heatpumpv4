@@ -8,23 +8,24 @@
     const svg = $('sed-svg');
 
     const FIELDS = {
-        pipe: ['medium', 'width', 'flow', 'points'],
-        cabinet: ['x', 'y', 'w', 'h'],
-        display: ['x', 'y', 'w', 'h', 'rows'],
-        heater: ['x', 'y', 'w', 'h', 'steps'],
-        tank: ['x', 'y', 'w', 'h', 'label', 'value', 'unit', 'decimals', 'active'],
-        radiator: ['x', 'y', 'w', 'h', 'active'],
-        pump: ['x', 'y', 'r', 'active'],
-        compressor: ['x', 'y', 'r', 'active'],
-        valve3: ['x', 'y', 'size', 'active'],
-        expansion: ['x', 'y', 'size'],
-        sensor: ['x', 'y', 'w', 'h', 'label', 'value', 'unit', 'decimals'],
-        label: ['x', 'y', 'text', 'size']
+        pipe: ['name', 'medium', 'width', 'flow', 'points'],
+        cabinet: ['name', 'x', 'y', 'w', 'h'],
+        display: ['name', 'x', 'y', 'w', 'h', 'rows'],
+        heater: ['name', 'x', 'y', 'w', 'h', 'steps'],
+        tank: ['name', 'x', 'y', 'w', 'h', 'label', 'value', 'unit', 'decimals', 'active'],
+        radiator: ['name', 'x', 'y', 'w', 'h', 'active'],
+        pump: ['name', 'x', 'y', 'r', 'active'],
+        compressor: ['name', 'x', 'y', 'r', 'active'],
+        valve3: ['name', 'x', 'y', 'size', 'active'],
+        expansion: ['name', 'x', 'y', 'size'],
+        sensor: ['name', 'x', 'y', 'w', 'h', 'label', 'value', 'unit', 'decimals'],
+        label: ['name', 'x', 'y', 'text', 'size']
     };
     const NUMBER = new Set(['x', 'y', 'w', 'h', 'r', 'size', 'width', 'decimals']);
     const CONDITION = new Set(['active', 'flow']);
     const MEDIA = ['brine_in', 'brine_out', 'cold', 'hot', 'return'];
     const LABELS = {
+        name: 'Namn (valfritt, bara för dig)',
         x: 'X', y: 'Y', w: 'Bredd', h: 'Höjd', r: 'Radie', size: 'Storlek', width: 'Rörbredd', decimals: 'Decimaler',
         label: 'Etikett', value: 'Register', unit: 'Enhet', text: 'Text', medium: 'Medium',
         active: 'Aktiv när', flow: 'Flöde när', points: 'Punkter', rows: 'Rader', steps: 'Steg'
@@ -49,6 +50,7 @@
     let layout = null;
     let sel = null;          // { kind: 'pipe'|'component', idx }
     let latest = {};
+    let registers = [];
     let undoStack = [];
     let dirty = false;
     let drag = null;
@@ -74,11 +76,6 @@
 
     function snap(v, free) {
         return free ? Math.round(v) : Math.round(v / 5) * 5;
-    }
-
-    function condToText(c) {
-        if (c === undefined) return '';
-        return typeof c === 'string' ? c : JSON.stringify(c);
     }
 
     function textToCond(t) {
@@ -169,10 +166,96 @@
         } else {
             i.type = type;
         }
-        if (opts.list) i.setAttribute('list', opts.list);
+        if (opts.list) attachRegisterPicker(i);
         i.value = value ?? '';
         i.addEventListener('change', () => onChange(i.value, i));
         return i;
+    }
+
+    // ---------- register picker: all registers with description and live value ----------
+
+    const picker = document.createElement('div');
+    picker.className = 'sed-picker';
+    picker.hidden = true;
+    document.body.append(picker);
+    let pickerInput = null;
+    let pickerRows = [];
+    let pickerActive = -1;
+
+    function formatLive(r) {
+        const v = latest[r.name];
+        if (v === undefined || v === null) return '--';
+        return (typeof v === 'number' ? +v.toFixed(2) : v) + (r.unit ? ' ' + r.unit : '');
+    }
+
+    function choose(name) {
+        const i = pickerInput;
+        closePicker();
+        i.value = name;
+        i.dispatchEvent(new Event('change'));
+    }
+
+    function highlight(k) {
+        pickerRows.forEach((row, n) => row.classList.toggle('active', n === k));
+        pickerActive = k;
+        if (pickerRows[k]) pickerRows[k].scrollIntoView({ block: 'nearest' });
+    }
+
+    function openPicker(i) {
+        pickerInput = i;
+        const q = i.value.trim().toLowerCase();
+        // JSON conditions are typed by hand
+        if (q.startsWith('{')) return closePicker();
+        // Registers that report a live value first, then alphabetical
+        const hits = registers
+            .filter(r => !q || r.name.toLowerCase().includes(q) || r.description.toLowerCase().includes(q))
+            .sort((a, b) => (b.name in latest) - (a.name in latest) || a.name.localeCompare(b.name));
+        picker.innerHTML = '';
+        pickerRows = hits.map(r => {
+            const row = document.createElement('div');
+            row.className = 'sed-pick-row' + (r.name in latest ? '' : ' nodata');
+            const name = document.createElement('code');
+            name.textContent = r.name;
+            const desc = document.createElement('span');
+            desc.className = 'sed-pick-desc';
+            desc.textContent = r.description;
+            const val = document.createElement('span');
+            val.className = 'sed-pick-val';
+            val.textContent = formatLive(r);
+            row.append(name, val, desc);
+            row.addEventListener('mousedown', e => { e.preventDefault(); choose(r.name); });
+            picker.append(row);
+            return row;
+        });
+        if (!hits.length) picker.textContent = 'Inga register matchar';
+        const b = i.getBoundingClientRect();
+        const width = Math.min(Math.max(b.width, 460), window.innerWidth - 16);
+        picker.style.width = width + 'px';
+        picker.style.left = Math.max(8, Math.min(b.left, window.innerWidth - width - 8)) + 'px';
+        picker.hidden = false;
+        const below = window.innerHeight - b.bottom;
+        picker.style.maxHeight = Math.max(below, b.top) - 16 + 'px';
+        picker.style.top = (below >= 200 || below >= b.top ? b.bottom + 2 : Math.max(8, b.top - picker.offsetHeight - 2)) + 'px';
+        highlight(-1);
+    }
+
+    function closePicker() {
+        picker.hidden = true;
+        pickerInput = null;
+    }
+
+    function attachRegisterPicker(i) {
+        i.autocomplete = 'off';
+        i.addEventListener('focus', () => openPicker(i));
+        i.addEventListener('input', () => openPicker(i));
+        i.addEventListener('blur', () => { if (pickerInput === i) closePicker(); });
+        i.addEventListener('keydown', e => {
+            if (picker.hidden || pickerInput !== i) return;
+            if (e.key === 'ArrowDown') { e.preventDefault(); highlight(Math.min(pickerActive + 1, pickerRows.length - 1)); }
+            else if (e.key === 'ArrowUp') { e.preventDefault(); highlight(Math.max(pickerActive - 1, 0)); }
+            else if (e.key === 'Enter' && pickerActive >= 0) { e.preventDefault(); pickerRows[pickerActive].dispatchEvent(new MouseEvent('mousedown')); }
+            else if (e.key === 'Escape') { e.preventDefault(); closePicker(); }
+        });
     }
 
     function setKey(obj, key, value) {
@@ -195,23 +278,166 @@
         return liveHint(name in latest ? `nu: ${latest[name]}` : 'inget livevärde');
     }
 
-    function condField(obj, key) {
-        const hint = liveHint('');
-        const showHint = () => {
-            if (obj[key] === undefined) hint.textContent = '';
-            else hint.textContent = R.test(obj[key], latest) ? 'nu: PÅ' : 'nu: AV';
+    // What "active"/"flow" does for each type, shown above the condition builder
+    const ACTIVE_HELP = {
+        pipe: 'Animerad flödeslinje när villkoret stämmer',
+        pump: 'Hjulet snurrar och pumpen blir grön',
+        compressor: 'Rotorn snurrar och kompressorn blir grön',
+        valve3: 'Pilen pekar uppåt (varmvatten) när villkoret stämmer, annars åt höger (radiator)',
+        tank: 'Röd ram och lampa tänds',
+        radiator: 'Värmevågor och rosa fyllning',
+        heater: 'Steget lyser och blixten pulserar'
+    };
+    const OPS = [['on', 'är på (> 0)'], ['gt', 'större än'], ['lt', 'mindre än'], ['eq', 'lika med'], ['ne', 'inte lika med']];
+
+    // Condition <-> rows. Returns null for conditions the builder can't show (nested all/any).
+    function parseCond(c) {
+        const row = x => {
+            if (typeof x === 'string') return { key: x, op: 'on', value: 0 };
+            if (!x || typeof x !== 'object' || !x.key) return null;
+            const op = ['gt', 'lt', 'eq', 'ne'].find(o => o in x);
+            return op ? { key: x.key, op, value: x[op] } : { key: x.key, op: 'on', value: 0 };
         };
-        const i = input('text', condToText(obj[key]), (v, el) => {
-            try {
-                setKey(obj, key, textToCond(v));
-            } catch (e) {
-                el.classList.add('is-invalid');
-                status(`Ogiltigt villkor: ${e.message}`, false);
+        if (c === undefined) return { mode: 'all', rows: [] };
+        const list = c && (c.all || c.any);
+        if (list) {
+            const rows = list.map(row);
+            return rows.every(Boolean) ? { mode: c.all ? 'all' : 'any', rows } : null;
+        }
+        const r = row(c);
+        return r ? { mode: 'all', rows: [r] } : null;
+    }
+
+    function serializeRow(r) {
+        return r.op === 'on' ? r.key : { key: r.key, [r.op]: Number(r.value) || 0 };
+    }
+
+    function serializeCond(state) {
+        const rows = state.rows.filter(r => r.key);
+        if (!rows.length) return undefined;
+        if (rows.length === 1) return serializeRow(rows[0]);
+        return { [state.mode]: rows.map(serializeRow) };
+    }
+
+    function describeRegister(name) {
+        const r = registers.find(x => x.name === name);
+        return r ? r.description : (name ? 'okänt register för detta märke' : '');
+    }
+
+    function condBuilder(obj, key, type) {
+        const box = document.createElement('div');
+        box.className = 'sed-cond';
+        let state = parseCond(obj[key]);
+        let rawMode = state === null;
+        if (!state) state = { mode: 'all', rows: [] };
+
+        function commit() {
+            snapshot();
+            const v = serializeCond(state);
+            if (v === undefined) delete obj[key];
+            else obj[key] = v;
+            render();
+            draw();
+        }
+
+        function draw() {
+            box.innerHTML = '';
+            const head = document.createElement('div');
+            head.className = 'sed-cond-head';
+            const title = document.createElement('span');
+            title.className = 'sed-list-title';
+            title.textContent = LABELS[key];
+            const total = liveHint(obj[key] === undefined ? 'inget villkor' : (R.test(obj[key], latest) ? 'nu: PÅ' : 'nu: AV'));
+            head.append(title, total);
+            box.append(head);
+            const h = document.createElement('div');
+            h.className = 'sed-cond-help';
+            h.textContent = (ACTIVE_HELP[type] ? ACTIVE_HELP[type] + '. ' : '') +
+                'Villkoren läser register (mätvärden) från värmepumpen, inte andra objekt i schemat.';
+            box.append(h);
+
+            if (rawMode) {
+                const t = input('text', obj[key] === undefined ? '' : JSON.stringify(obj[key]), (v, el) => {
+                    try {
+                        const parsed = textToCond(v);
+                        snapshot();
+                        if (parsed === undefined) delete obj[key]; else obj[key] = parsed;
+                        render();
+                        const st = parseCond(obj[key]);
+                        if (st) { state = st; rawMode = false; }
+                        draw();
+                    } catch (e) {
+                        el.classList.add('is-invalid');
+                        status(`Ogiltigt villkor: ${e.message}`, false);
+                    }
+                });
+                t.placeholder = '{"any":[{"key":"...","gt":0}, ...]}';
+                box.append(t);
+            } else {
+                if (state.rows.length > 1) {
+                    const mode = input('', state.mode, v => { state.mode = v; commit(); }, { select: [] });
+                    mode.add(new Option('Alla måste stämma (och)', 'all'));
+                    mode.add(new Option('Något räcker (eller)', 'any'));
+                    mode.value = state.mode;
+                    box.append(mode);
+                }
+                state.rows.forEach((r, i) => {
+                    const row = document.createElement('div');
+                    row.className = 'sed-cond-row';
+                    const reg = input('text', r.key, v => { r.key = v.trim(); commit(); }, { list: true });
+                    reg.placeholder = 'register';
+                    const op = input('', r.op, v => { r.op = v; commit(); }, { select: [] });
+                    OPS.forEach(([v, l]) => op.add(new Option(l, v)));
+                    op.value = r.op;
+                    const val = input('number', r.value, v => { r.value = Number(v); commit(); });
+                    val.hidden = r.op === 'on';
+                    const del = document.createElement('button');
+                    del.className = 'btn btn-sm btn-outline-danger';
+                    del.textContent = 'x';
+                    del.addEventListener('click', () => { state.rows.splice(i, 1); commit(); });
+                    row.append(reg, op, val, del);
+                    box.append(row);
+
+                    const meta = document.createElement('div');
+                    meta.className = 'sed-cond-meta';
+                    if (r.key) {
+                        const now = latest[r.key];
+                        const ok = R.test(serializeRow(r), latest);
+                        meta.textContent = `${describeRegister(r.key)}. Nu: ${now ?? '--'} -> ${ok ? 'stämmer' : 'stämmer inte'}`;
+                    }
+                    box.append(meta);
+                });
             }
-        }, { list: 'sed-registers' });
-        i.placeholder = 'register eller {"key":"...","gt":0}';
-        showHint();
-        return field(LABELS[key], i, hint);
+
+            const tools = document.createElement('div');
+            tools.className = 'sed-cond-tools';
+            if (!rawMode) {
+                const add = document.createElement('button');
+                add.className = 'btn btn-sm btn-outline-secondary';
+                add.textContent = '+ Villkor';
+                add.addEventListener('click', () => {
+                    state.rows.push({ key: '', op: 'on', value: 0 });
+                    draw();
+                    box.querySelectorAll('.sed-cond-row input[type=text]')[state.rows.length - 1].focus();
+                });
+                tools.append(add);
+            }
+            const json = document.createElement('button');
+            json.className = 'btn btn-sm btn-link';
+            json.textContent = rawMode ? 'Byggare' : 'JSON';
+            json.addEventListener('click', () => {
+                const st = parseCond(obj[key]);
+                if (rawMode && !st) return status('Villkoret är för komplext för byggaren, redigera som JSON', false);
+                if (st) state = st;
+                rawMode = !rawMode;
+                draw();
+            });
+            tools.append(json);
+            box.append(tools);
+        }
+
+        draw();
+        return box;
     }
 
     function listEditor(obj, key, subFields) {
@@ -224,12 +450,12 @@
         (obj[key] || []).forEach((row, i) => {
             const r = document.createElement('div');
             r.className = 'sed-list-row';
+            const below = [];
             subFields.forEach(f => {
                 let el;
                 if (CONDITION.has(f)) {
-                    el = input('text', condToText(row[f]), v => {
-                        try { setKey(row, f, textToCond(v)); } catch (e) { status(`Ogiltigt villkor: ${e.message}`, false); }
-                    }, { list: 'sed-registers' });
+                    below.push(condBuilder(row, f, obj.type));
+                    return;
                 } else if (NUMBER.has(f)) {
                     el = input('number', row[f], v => setKey(row, f, v === '' ? undefined : Number(v)));
                 } else {
@@ -244,7 +470,7 @@
             del.textContent = 'x';
             del.addEventListener('click', () => { snapshot(); obj[key].splice(i, 1); render(); renderPanel(); });
             r.append(del);
-            box.append(r);
+            box.append(r, ...below);
         });
         const add = document.createElement('button');
         add.className = 'btn btn-sm btn-outline-secondary';
@@ -295,6 +521,19 @@
         return box;
     }
 
+    const TYPE_NAMES = {
+        pipe: 'Rör', cabinet: 'Skåp', display: 'Display', heater: 'Elpatron', tank: 'Varmvattenberedare',
+        radiator: 'Radiator', pump: 'Pump', compressor: 'Kompressor', valve3: 'Växelventil',
+        expansion: 'Expansionsventil', sensor: 'Givare', label: 'Text'
+    };
+
+    function itemTitle(item, kind, idx) {
+        const type = kind === 'pipe' ? 'pipe' : item.type;
+        const name = item.name || item.label || item.text || (item.value ? item.value : '');
+        const typeName = TYPE_NAMES[type] || type;
+        return `${typeName}${name && name !== typeName ? ': ' + name : ''} (#${idx})`;
+    }
+
     function renderPanel() {
         const props = $('sed-props');
         props.innerHTML = '';
@@ -304,13 +543,13 @@
             return;
         }
         const type = sel.kind === 'pipe' ? 'pipe' : item.type;
-        $('sed-panel-title').textContent = sel.kind === 'pipe' ? `Rör #${sel.idx}` : `${type} #${sel.idx}`;
+        $('sed-panel-title').textContent = itemTitle(item, sel.kind, sel.idx);
 
         (FIELDS[type] || []).forEach(key => {
             if (key === 'points') return props.append(pointsEditor(item));
             if (key === 'rows') return props.append(listEditor(item, key, ['label', 'value', 'unit', 'decimals']));
             if (key === 'steps') return props.append(listEditor(item, key, ['label', 'active']));
-            if (CONDITION.has(key)) return props.append(condField(item, key));
+            if (CONDITION.has(key)) return props.append(condBuilder(item, key, type));
             if (key === 'medium') {
                 return props.append(field(LABELS[key], input('', item.medium || 'hot', v => setKey(item, key, v), { select: MEDIA })));
             }
@@ -576,11 +815,9 @@
     }
 
     async function loadRegisters() {
-        const list = $('sed-registers');
-        list.innerHTML = '';
+        registers = [];
         try {
-            const regs = await api(`/api/registers/${brand}`);
-            regs.forEach(r => list.append(new Option(`${r.description} ${r.unit ? '(' + r.unit + ')' : ''}`, r.name)));
+            registers = await api(`/api/registers/${brand}`);
         } catch (e) {
             status(e.message, false);
         }
