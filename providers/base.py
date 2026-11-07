@@ -402,10 +402,14 @@ class HeatPumpProvider(ABC):
         """
         return self.alarm_codes.get(code, f"Unknown alarm: {code}")
 
+    def get_schema_path(self) -> Path:
+        """Path to schema.yaml next to the provider module"""
+        return Path(inspect.getfile(type(self))).parent / 'schema.yaml'
+
     def get_schema_layout(self) -> Optional[Dict[str, Any]]:
         """Return the live schema layout from schema.yaml next to the provider, or None."""
         import yaml
-        path = Path(inspect.getfile(type(self))).parent / 'schema.yaml'
+        path = self.get_schema_path()
         if not path.exists():
             return None
         with open(path, 'r', encoding='utf-8') as f:

@@ -28,7 +28,7 @@ import eventlet
 # Add parent directory to path for provider imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from providers import get_provider
+from providers import get_provider, get_supported_brands
 from data_query import HeatPumpDataQuery, load_config, CONFIG_PATH
 from config_colors import THERMIA_COLORS
 
@@ -41,6 +41,7 @@ logger = logging.getLogger(__name__)
 
 # Initialize Flask app
 app = Flask(__name__)
+app.json.sort_keys = False  # keep schema.yaml key order in /api/schema
 app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'heatpump-dashboard-secret-key')
 
 # Same-origin only unless CORS_ORIGINS is set (comma separated)
@@ -341,6 +342,134 @@ def save_settings():
         'needs_restart': needs_restart,
         'message': 'Inställningar sparade'
     })
+
+
+# ==================== Schema Editor ====================
+
+SCHEMA_TYPES = {'cabinet', 'display', 'heater', 'tank', 'radiator', 'pump', 'compressor',
+                'valve3', 'expansion', 'sensor', 'label'}
+
+SCHEMA_HEADER = """# Live system schema - edited with /schema-editor
+# Coordinates in the viewbox canvas. Open the dashboard with ?grid=1 to see a grid.
+# Boxes (cabinet, display, heater, tank, radiator): x,y = top-left corner, w,h = size.
+# Points (pump, compressor, expansion, valve3, sensor): x,y = center.
+# Conditions: a metric name (on when > 0), or {key, gt|lt|eq|ne}, or {all: [...]}, {any: [...]}.
+"""
+
+
+def _is_number(v):
+    return isinstance(v, (int, float)) and not isinstance(v, bool)
+
+
+def validate_schema_layout(layout):
+    errors = []
+    if not isinstance(layout, dict):
+        return ['Layouten måste vara ett objekt']
+    vb = layout.get('viewbox')
+    if not (isinstance(vb, list) and len(vb) == 2 and all(_is_number(v) and v > 0 for v in vb)):
+        errors.append('viewbox: måste vara [bredd, höjd]')
+    pipes = layout.get('pipes', [])
+    comps = layout.get('components', [])
+    if not isinstance(pipes, list):
+        errors.append('pipes: måste vara en lista')
+        pipes = []
+    if not isinstance(comps, list):
+        errors.append('components: måste vara en lista')
+        comps = []
+    for i, p in enumerate(pipes):
+        pts = p.get('points') if isinstance(p, dict) else None
+        if not (isinstance(pts, list) and len(pts) >= 2 and
+                all(isinstance(pt, list) and len(pt) == 2 and all(_is_number(v) for v in pt) for pt in pts)):
+            errors.append(f'pipes[{i}]: points måste vara minst två [x, y]')
+    for i, c in enumerate(comps):
+        if not isinstance(c, dict) or c.get('type') not in SCHEMA_TYPES:
+            errors.append(f'components[{i}]: okänd typ {c.get("type") if isinstance(c, dict) else c!r}')
+            continue
+        for key in ('x', 'y', 'w', 'h', 'r'):
+            if key in c and not _is_number(c[key]):
+                errors.append(f'components[{i}].{key}: måste vara ett tal')
+    return errors
+
+
+SCHEMA_KEY_ORDER = ['type', 'medium', 'x', 'y', 'w', 'h', 'r', 'size', 'points', 'label', 'text',
+                    'value', 'unit', 'decimals', 'key', 'gt', 'lt', 'eq', 'ne', 'all', 'any',
+                    'active', 'flow', 'rows', 'steps']
+
+
+def _order_keys(obj):
+    if isinstance(obj, dict):
+        rank = {k: i for i, k in enumerate(SCHEMA_KEY_ORDER)}
+        return {k: _order_keys(obj[k]) for k in sorted(obj, key=lambda k: rank.get(k, len(rank)))}
+    if isinstance(obj, list):
+        return [_order_keys(v) for v in obj]
+    return obj
+
+
+def schema_to_yaml(layout):
+    """One line per pipe/component, keys in a readable order"""
+    def line(item):
+        return yaml.safe_dump(_order_keys(item), default_flow_style=True, sort_keys=False,
+                              allow_unicode=True, width=float('inf')).strip()
+
+    out = [SCHEMA_HEADER.rstrip(), f"viewbox: {line(layout['viewbox'])}", '', 'pipes:']
+    out += [f'  - {line(p)}' for p in layout.get('pipes', [])]
+    out += ['', 'components:']
+    out += [f'  - {line(c)}' for c in layout.get('components', [])]
+    return '\n'.join(out) + '\n'
+
+
+def _schema_provider(brand):
+    if brand not in get_supported_brands():
+        return None
+    return provider if brand == provider.get_brand_name() else get_provider(brand)
+
+
+@app.route('/schema-editor')
+def schema_editor():
+    return render_template('schema_editor.html',
+                           brand=provider.get_brand_name(),
+                           brands=get_supported_brands())
+
+
+@app.route('/api/schema/<brand>')
+def get_schema(brand):
+    p = _schema_provider(brand)
+    if p is None:
+        return jsonify({'error': f'Okänt märke: {brand}'}), 404
+    return jsonify(p.get_schema_layout() or {'viewbox': [800, 450], 'pipes': [], 'components': []})
+
+
+@app.route('/api/registers/<brand>')
+def get_registers(brand):
+    p = _schema_provider(brand)
+    if p is None:
+        return jsonify({'error': f'Okänt märke: {brand}'}), 404
+    regs = [{'name': r['name'], 'description': r.get('description', ''),
+             'unit': r.get('unit', ''), 'type': r.get('type', '')} for r in p.registers.values()]
+    return jsonify(sorted(regs, key=lambda r: r['name']))
+
+
+@app.route('/api/schema/<brand>', methods=['POST'])
+def save_schema(brand):
+    p = _schema_provider(brand)
+    if p is None:
+        return jsonify({'success': False, 'message': f'Okänt märke: {brand}'}), 404
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({'success': False, 'message': 'Ogiltig JSON'}), 400
+    layout = data.get('layout')
+    errors = validate_schema_layout(layout)
+    if errors:
+        return jsonify({'success': False, 'message': '; '.join(errors), 'errors': errors}), 400
+
+    text = schema_to_yaml(layout)
+    if data.get('save'):
+        try:
+            p.get_schema_path().write_text(text, encoding='utf-8')
+        except Exception as e:
+            return jsonify({'success': False, 'message': f'Kunde inte spara: {e}'}), 500
+        logger.info(f"✅ Saved schema for {brand}")
+    return jsonify({'success': True, 'yaml': text})
 
 
 # Allowed container names for restart (safety whitelist)

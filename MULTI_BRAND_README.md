@@ -322,6 +322,22 @@ Live-vyn ritas som SVG från `providers/<brand>/schema.yaml`. Inga bilder behöv
 nytt märke eller annan pumpmodell = ny YAML-fil. Dashboarden monterar `providers/`,
 så ändringar syns direkt vid omladdning av sidan.
 
+#### Editor
+
+Öppna `/schema-editor` (pennan i schema-kortet). Editorn använder samma renderare som
+live-vyn och visar live-värden från databasen.
+
+- Klicka för att välja, dra för att flytta (snäpper 5 px, Shift = fritt), piltangenter 1 px (Shift 10 px)
+- Valt rör visar handtag för varje punkt; punkter läggs till/tas bort i panelen
+- `Register`, `Aktiv när` och `Flöde när` föreslår registernamn och visar aktuellt värde/PÅ/AV
+- `Kopiera från` hämtar ett annat märkes layout som startpunkt
+- `Visa allt aktivt` tänder alla animationer
+- Ctrl+Z ångra, Ctrl+D duplicera, Delete ta bort, Esc avmarkera
+- `Spara` skriver `providers/<brand>/schema.yaml` (kräver att `providers/` är monterad
+  skrivbar, se `docker-compose.yml`), `Ladda ner` och `Kopiera YAML` ger filen utan att spara
+
+Filen skrivs om med en rad per rör/komponent, egna kommentarer i filen försvinner vid sparning.
+
 Lägg till `?grid=1` i URL:en för att få ett rutnät med koordinater (muspekarens
 position visas nere till höger) när du placerar delar.
 

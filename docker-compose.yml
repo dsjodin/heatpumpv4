@@ -66,8 +66,8 @@ services:
       - PYTHONUNBUFFERED=1
     volumes:
       - ./config.yaml:/app/config.yaml
-      # Mounted so edits to providers/<brand>/schema.yaml show up on page reload
-      - ./providers:/app/providers:ro
+      # Writable: the schema editor (/schema-editor) saves providers/<brand>/schema.yaml here
+      - ./providers:/app/providers
       - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
       - influxdb

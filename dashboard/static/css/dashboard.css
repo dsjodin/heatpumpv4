@@ -899,6 +899,7 @@ body {
 @keyframes sch-pulse { 50% { opacity: 0.4; } }
 @keyframes sch-rise { 0% { transform: translateY(4px); opacity: 0; } 50% { opacity: 1; } 100% { transform: translateY(-4px); opacity: 0; } }
 
+.sch-grid { pointer-events: none; }
 .sch-grid line { stroke: rgba(0, 0, 0, 0.15); stroke-width: 1; }
 .sch-grid text { font-size: 9px; fill: rgba(0, 0, 0, 0.5); }
 .sch-grid .sch-grid-pos { font-size: 14px; font-weight: 700; text-anchor: end; fill: #d6336c; }
@@ -939,3 +940,38 @@ body {
 
 }
 
+
+/* ==================== Schema Editor ==================== */
+.sed-body { background: #f1f3f5; }
+.sed-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem 1rem;
+    align-items: center;
+    padding: 0.5rem 1rem;
+    background: #fff;
+    border-bottom: 1px solid #dee2e6;
+}
+.sed-group { display: inline-flex; gap: 0.35rem; align-items: center; margin: 0; white-space: nowrap; }
+.sed-group .form-select { width: auto; }
+.sed-status { padding: 0.25rem 1rem; min-height: 1.75rem; font-size: 0.9rem; }
+.sed-status.ok { color: #2b8a3e; }
+.sed-status.err { color: #c92a2a; }
+.sed-main { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 1rem; padding: 0 1rem 1rem; }
+.sed-canvas { background: #fff; border-radius: 8px; padding: 0.5rem; }
+.sed-svg { touch-action: none; user-select: none; cursor: default; }
+.sed-svg [data-kind] { cursor: move; }
+.sed-hint { font-size: 0.8rem; color: #868e96; margin: 0.5rem 0 0; }
+.sed-panel { background: #fff; border-radius: 8px; padding: 0.75rem; max-height: calc(100vh - 120px); overflow-y: auto; }
+.sed-field { display: block; font-size: 0.8rem; margin-bottom: 0.4rem; }
+.sed-live { color: #1971c2; }
+.sed-list { border-top: 1px solid #e9ecef; padding-top: 0.4rem; margin-top: 0.4rem; }
+.sed-list-title { font-size: 0.8rem; font-weight: 600; margin-bottom: 0.25rem; }
+.sed-list-row { display: flex; gap: 0.25rem; margin-bottom: 0.25rem; }
+.sed-list-row .form-control { min-width: 0; }
+.sed-yaml { height: 240px; font-family: monospace; font-size: 0.75rem; }
+.sed-overlay .sed-sel { fill: none; stroke: #1c7ed6; stroke-width: 2; stroke-dasharray: 6 4; pointer-events: none; }
+.sed-overlay .sed-handle { fill: #fff; stroke: #1c7ed6; stroke-width: 2; cursor: grab; }
+@media (max-width: 900px) {
+    .sed-main { grid-template-columns: 1fr; }
+}

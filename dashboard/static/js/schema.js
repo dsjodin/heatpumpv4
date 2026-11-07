@@ -4,7 +4,7 @@
  */
 (function () {
     const NS = 'http://www.w3.org/2000/svg';
-    const bindings = [];
+    let bindings = [];
 
     function el(tag, attrs, parent, text) {
         const node = document.createElementNS(NS, tag);
@@ -172,33 +172,47 @@
             el('line', { x1: 0, y1: y, x2: w, y2: y }, g);
             el('text', { x: 2, y: y - 2 }, g, y);
         }
-        const pos = el('text', { x: w - 6, y: h - 6, class: 'sch-grid-pos' }, g, '');
-        svg.addEventListener('mousemove', e => {
-            const p = svg.createSVGPoint();
-            p.x = e.clientX; p.y = e.clientY;
-            const s = p.matrixTransform(svg.getScreenCTM().inverse());
-            pos.textContent = `${Math.round(s.x)}, ${Math.round(s.y)}`;
-        });
+        svg.gridPos = el('text', { x: w - 6, y: h - 6, class: 'sch-grid-pos' }, g, '');
+        if (!svg.gridListener) {
+            svg.gridListener = e => {
+                const s = toSvgPoint(svg, e);
+                if (svg.gridPos) svg.gridPos.textContent = `${Math.round(s.x)}, ${Math.round(s.y)}`;
+            };
+            svg.addEventListener('mousemove', svg.gridListener);
+        }
     }
 
-    function buildSchema(svg, layout) {
+    function toSvgPoint(svg, e) {
+        const p = svg.createSVGPoint();
+        p.x = e.clientX; p.y = e.clientY;
+        return p.matrixTransform(svg.getScreenCTM().inverse());
+    }
+
+    // Draws layout into svg. Each pipe/component is wrapped in <g data-kind data-idx>.
+    function build(svg, layout, opts = {}) {
+        bindings = [];
+        const local = bindings;
+        while (svg.firstChild) svg.removeChild(svg.firstChild);
         const [w, h] = layout.viewbox || [800, 450];
         svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
         // Cabinets go behind the pipes, everything else on top
         const back = el('g', {}, svg);
         const pipes = el('g', {}, svg);
         const comps = el('g', {}, svg);
-        (layout.pipes || []).forEach(c => RENDER.pipe(pipes, c));
-        (layout.components || []).forEach(c => {
-            if (RENDER[c.type]) RENDER[c.type](c.type === 'cabinet' ? back : comps, c);
-            else console.warn('Unknown schema component type:', c.type);
+        (layout.pipes || []).forEach((c, i) => {
+            RENDER.pipe(el('g', { 'data-kind': 'pipe', 'data-idx': i }, pipes), c);
         });
-        if (new URLSearchParams(location.search).has('grid')) drawGrid(svg, w, h);
-    }
-
-    function updateSchema(latest) {
-        if (!latest) return;
-        bindings.forEach(fn => fn(latest));
+        (layout.components || []).forEach((c, i) => {
+            if (!RENDER[c.type]) return console.warn('Unknown schema component type:', c.type);
+            const g = el('g', { 'data-kind': 'component', 'data-idx': i }, c.type === 'cabinet' ? back : comps);
+            RENDER[c.type](g, c);
+        });
+        if (opts.grid) drawGrid(svg, w, h);
+        return {
+            update(latest) {
+                if (latest) local.forEach(fn => fn(latest));
+            }
+        };
     }
 
     function init() {
@@ -206,11 +220,13 @@
         const src = document.getElementById('schema-layout');
         if (!svg || !src) return;
         const layout = JSON.parse(src.textContent);
-        if (layout) buildSchema(svg, layout);
+        if (!layout) return;
+        const r = build(svg, layout, { grid: new URLSearchParams(location.search).has('grid') });
+        window.updateSchema = r.update;
     }
+
+    window.SchemaRenderer = { build, test, el, toSvgPoint, types: Object.keys(RENDER).filter(t => t !== 'pipe') };
 
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
     else init();
-
-    window.updateSchema = updateSchema;
 })();
