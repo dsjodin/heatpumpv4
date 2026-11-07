@@ -893,7 +893,7 @@ body {
 .sch-radiator.active .sch-radiator-body { fill: #ffe3e3; }
 .sch-radiator.active .sch-wave { opacity: 1; animation: sch-rise 2s ease-in-out infinite; }
 
-.sch-impeller { transform-box: fill-box; transform-origin: center; }
+.sch-impeller { transform-box: view-box; transform-origin: 0 0; }
 
 @keyframes sch-pulse { 50% { opacity: 0.4; } }
 @keyframes sch-rise { 0% { transform: translateY(4px); opacity: 0; } 50% { opacity: 1; } 100% { transform: translateY(-4px); opacity: 0; } }
