@@ -88,6 +88,20 @@ function initMainChart() {
     console.log('📊 Main chart initialized');
 }
 
+// Loading overlay on the chart while new data is fetched
+function setChartLoading(on) {
+    if (!mainChart) initMainChart();
+    if (!mainChart) return;
+    if (on) {
+        mainChart.showLoading('default', {
+            text: 'Laddar data...', color: '#ff6b35', textColor: '#495057',
+            maskColor: 'rgba(255, 255, 255, 0.75)', fontSize: 14
+        });
+    } else {
+        mainChart.hideLoading();
+    }
+}
+
 // ==================== Update Chart ====================
 
 function updateMainChart(data) {
@@ -842,6 +856,7 @@ function updateAnalysStats(data) {
 // ==================== Exports ====================
 
 window.initMainChart = initMainChart;
+window.setChartLoading = setChartLoading;
 window.updateMainChart = updateMainChart;
 window.updateAnalysStats = updateAnalysStats;
 window.switchChart = switchChart;
