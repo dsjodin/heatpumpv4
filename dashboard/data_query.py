@@ -231,6 +231,8 @@ class HeatPumpDataQuery:
                         |> aggregateWindow(every: {aggregation_window}, fn: last, createEmpty: false)
 
                     union(tables: [value_data, status_data])
+                        |> keep(columns: ["_time", "_value", "name"])
+                        |> group()
                         |> pivot(rowKey: ["_time"], columnKey: ["name"], valueColumn: "_value")
                         |> sort(columns: ["_time"])
                 '''
@@ -244,6 +246,8 @@ class HeatPumpDataQuery:
                         |> filter(fn: (r) => r._measurement == "heatpump")
                         |> filter(fn: (r) => {value_filter})
                         |> aggregateWindow(every: {aggregation_window}, fn: mean, createEmpty: false)
+                        |> keep(columns: ["_time", "_value", "name"])
+                        |> group()
                         |> pivot(rowKey: ["_time"], columnKey: ["name"], valueColumn: "_value")
                         |> sort(columns: ["_time"])
                 '''
@@ -257,6 +261,8 @@ class HeatPumpDataQuery:
                         |> filter(fn: (r) => r._measurement == "heatpump")
                         |> filter(fn: (r) => {status_filter})
                         |> aggregateWindow(every: {aggregation_window}, fn: last, createEmpty: false)
+                        |> keep(columns: ["_time", "_value", "name"])
+                        |> group()
                         |> pivot(rowKey: ["_time"], columnKey: ["name"], valueColumn: "_value")
                         |> sort(columns: ["_time"])
                 '''
@@ -953,47 +959,36 @@ class HeatPumpDataQuery:
                     'cycles_per_day': 0
                 }
 
-            # Calculate average cycle duration AND energy
-            cycle_durations = []
-            cycle_energies = []
-
             # MINIMUM DURATION FILTER - configurable in config.yaml
             min_cycle_minutes = self.hw_min_cycle_minutes
 
-            filtered_count = 0
+            # Vectorized (was a full scan of both frames per cycle):
+            # cycle end = first valve sample == 0 after the start
+            valve_t = valve_df['_time'].values.astype('datetime64[ns]').astype(np.int64)
+            start_t = cycles_start['_time'].values.astype('datetime64[ns]').astype(np.int64)
+            zero_t = valve_t[(valve_df['_value'] == 0).to_numpy()]
+            end_idx = np.searchsorted(zero_t, start_t, side='right')
+            has_end = end_idx < len(zero_t)
+            start_t = start_t[has_end]
+            end_t = zero_t[end_idx[has_end]]
 
-            for start_time in cycles_start['_time']:
-                after_start = valve_df[valve_df['_time'] > start_time]
-                end_times = after_start[after_start['_value'] == 0]
+            durations = (end_t - start_t) / 1e9 / 60
+            keep = durations >= min_cycle_minutes
+            filtered_count = int((~keep).sum())
+            start_t, end_t = start_t[keep], end_t[keep]
+            cycle_durations = list(durations[keep])
 
-                if not end_times.empty:
-                    end_time = end_times.iloc[0]['_time']
-                    duration_seconds = (end_time - start_time).total_seconds()
-                    duration_minutes = duration_seconds / 60
-
-                    # FILTER: Skippa cykler kortare än minimum
-                    if duration_minutes < min_cycle_minutes:
-                        filtered_count += 1
-                        continue
-
-                    cycle_durations.append(duration_minutes)
-
-                    # Calculate energy for this cycle
-                    cycle_power = power_df[
-                        (power_df['_time'] >= start_time) &
-                        (power_df['_time'] <= end_time)
-                    ].copy()
-
-                    if not cycle_power.empty:
-                        cycle_power = cycle_power.sort_values('_time')
-                        cycle_power['time_diff_hours'] = cycle_power['_time'].diff().dt.total_seconds() / 3600
-                        cycle_power['time_diff_hours'] = cycle_power['time_diff_hours'].fillna(0)
-
-                        # Energy = Power (W) * Time (h) / 1000 = kWh
-                        cycle_power['energy_kwh'] = (cycle_power['_value'] * cycle_power['time_diff_hours']) / 1000
-
-                        total_cycle_energy = cycle_power['energy_kwh'].sum()
-                        cycle_energies.append(total_cycle_energy)
+            # Energy per cycle: power x time since previous sample, summed over [start, end]
+            # (the first sample inside a cycle counts as 0 h). Cumulative sum makes each cycle O(1).
+            cycle_energies = []
+            if not power_df.empty and len(start_t):
+                power_t = power_df['_time'].values.astype('datetime64[ns]').astype(np.int64)
+                dt_hours = np.diff(power_t, prepend=power_t[0]) / 1e9 / 3600
+                cum = np.cumsum(power_df['_value'].to_numpy(dtype=float) * dt_hours / 1000)
+                lo = np.searchsorted(power_t, start_t, side='left')
+                hi = np.searchsorted(power_t, end_t, side='right') - 1
+                has_power = hi >= lo
+                cycle_energies = list(cum[hi[has_power]] - cum[lo[has_power]])
 
             # Antal giltiga cykler (efter filtrering)
             num_valid_cycles = len(cycle_durations)
