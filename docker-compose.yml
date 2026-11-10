@@ -61,6 +61,8 @@ services:
       - INFLUXDB_TOKEN=${INFLUXDB_TOKEN}
       - INFLUXDB_ORG=${INFLUXDB_ORG:-thermia}
       - INFLUXDB_BUCKET=${INFLUXDB_BUCKET:-heatpump}
+      # Daily statistics and spot prices, kept without retention (created automatically)
+      - INFLUXDB_LONGTERM_BUCKET=${INFLUXDB_LONGTERM_BUCKET:-heatpump_longterm}
       - HEATPUMP_BRAND=${HEATPUMP_BRAND:-thermia}
       - SECRET_KEY=${SECRET_KEY:-heatpump-dashboard-secret-key-change-in-production}
       - PYTHONUNBUFFERED=1

@@ -3,8 +3,21 @@
  * Two-view design: Monitor (real-time) and Analys (charts)
  */
 
+// Per-browser preferences (selected view, range, chart); storage may be unavailable
+const prefs = {
+    get(key, fallback) {
+        try { const v = localStorage.getItem('hp.' + key); return v === null ? fallback : JSON.parse(v); }
+        catch (e) { return fallback; }
+    },
+    set(key, value) {
+        try { localStorage.setItem('hp.' + key, JSON.stringify(value)); } catch (e) { /* ignore */ }
+    }
+};
+window.prefs = prefs;
+
 // Global state
-let currentTimeRange = '24h';
+const TIME_RANGES = ['1h', '6h', '24h', '7d', '30d'];
+let currentTimeRange = TIME_RANGES.includes(prefs.get('timeRange')) ? prefs.get('timeRange') : '24h';
 let currentView = 'monitor';
 let connected = false;
 let latestData = null;
@@ -136,14 +149,20 @@ function updateAllUI(data) {
         window.updateAnalysStats(data);
     }
 
-    // Update last update time
+    // Time of the newest sample, and warning if it is old
+    if (data.status) {
+        dataTime = data.status.data_time ? new Date(data.status.data_time) : null;
+        staleAfterSeconds = data.status.stale_after_seconds || 120;
+    }
     updateLastUpdateTime();
 }
 
 // ==================== View Switching ====================
 
 function switchView(viewName) {
+    if (!document.getElementById(`view-${viewName}`)) viewName = 'monitor';
     currentView = viewName;
+    prefs.set('view', viewName);
 
     // Update tab styles
     document.querySelectorAll('.view-tabs .nav-link').forEach(tab => {
@@ -171,6 +190,10 @@ function switchView(viewName) {
     // Load settings when switching to settings view
     if (viewName === 'settings') {
         loadSettings();
+    }
+
+    if (viewName === 'stats' && window.loadStats) {
+        window.loadStats();
     }
 
     console.log(`📱 Switched to ${viewName} view`);
@@ -318,14 +341,13 @@ function updateMonitorPanels(data) {
         }
     }
 
-    // Energy and cost
-    if (data.kpi && data.kpi.energy) {
-        const energy = data.kpi.energy;
-        if (energy.total_kwh !== undefined) {
-            setValue('panel-energy-today', energy.total_kwh, ' kWh');
+    // Energy and cost since local midnight
+    if (data.today) {
+        if (data.today.energy_kwh !== undefined) {
+            setValue('panel-energy-today', data.today.energy_kwh, ' kWh');
         }
-        if (energy.total_cost !== undefined) {
-            setValue('panel-cost-today', energy.total_cost, ' kr');
+        if (data.today.cost_kr !== undefined) {
+            setValue('panel-cost-today', data.today.cost_kr, ' kr');
         }
     }
 
@@ -391,13 +413,38 @@ function updateConnectionStatus(isConnected) {
     }
 }
 
+let dataTime = null;
+let staleAfterSeconds = 120;
+
+function formatAge(seconds) {
+    if (seconds < 3600) return `${Math.round(seconds / 60)} min`;
+    if (seconds < 172800) return `${Math.round(seconds / 3600)} h`;
+    return `${Math.round(seconds / 86400)} dagar`;
+}
+
+// Shows the time of the newest sample; re-evaluated on a timer so it turns red without new pushes
 function updateLastUpdateTime() {
     const el = document.getElementById('last-update');
-    if (el) {
-        const now = new Date();
-        el.textContent = now.toLocaleTimeString('sv-SE');
+    const banner = document.getElementById('stale-banner');
+    const schema = document.getElementById('schema-container');
+    if (!el || latestData === null) return;
+
+    const ageSeconds = dataTime ? (Date.now() - dataTime.getTime()) / 1000 : Infinity;
+    const stale = ageSeconds > staleAfterSeconds;
+    const sameDay = dataTime && dataTime.toDateString() === new Date().toDateString();
+    const when = !dataTime ? 'över 30 dagar'
+        : sameDay ? dataTime.toLocaleTimeString('sv-SE')
+        : dataTime.toLocaleString('sv-SE', { dateStyle: 'short', timeStyle: 'short' });
+
+    el.textContent = stale ? `Ingen ny data (${dataTime ? formatAge(ageSeconds) : when})` : `Data ${when}`;
+    el.classList.toggle('stale-text', stale);
+    if (banner) {
+        banner.classList.toggle('d-none', !stale);
+        document.getElementById('stale-since').textContent = dataTime ? `${when} (${formatAge(ageSeconds)})` : when;
     }
+    if (schema) schema.classList.toggle('schema-stale', stale);
 }
+setInterval(updateLastUpdateTime, 15000);
 
 // ==================== Event Listeners ====================
 
@@ -411,11 +458,48 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
 
+    // Restore saved selections
+    switchView(prefs.get('view', 'monitor'));
+    const savedChart = prefs.get('chartType', 'temperature');
+    const chartSelect = document.getElementById('chart-selector');
+    if (chartSelect && [...chartSelect.options].some(o => o.value === savedChart)) {
+        chartSelect.value = savedChart;
+        if (window.switchChart) window.switchChart(savedChart);
+    }
+    const savedSeries = prefs.get('series', {});
+    document.querySelectorAll('.series-toggle').forEach(t => {
+        if (t.id in savedSeries) t.checked = savedSeries[t.id];
+    });
+
+    // Restart collector from the stale data banner
+    const staleRestart = document.getElementById('btn-stale-restart');
+    if (staleRestart) {
+        staleRestart.addEventListener('click', async () => {
+            const result = document.getElementById('stale-restart-result');
+            staleRestart.disabled = true;
+            result.textContent = 'Startar om...';
+            try {
+                const response = await fetch('/api/restart-service', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ service: 'collector' })
+                });
+                result.textContent = (await response.json()).message || '';
+            } catch (error) {
+                result.textContent = `Fel: ${error.message}`;
+            } finally {
+                staleRestart.disabled = false;
+            }
+        });
+    }
+
     // Time range change
     const timeRangeSelect = document.getElementById('time-range');
     if (timeRangeSelect) {
+        timeRangeSelect.value = currentTimeRange;
         timeRangeSelect.addEventListener('change', (e) => {
             currentTimeRange = e.target.value;
+            prefs.set('timeRange', currentTimeRange);
             console.log(`🔄 Time range: ${currentTimeRange}`);
             // Reset zoom state when time range changes
             if (window.resetZoomState) {
@@ -444,21 +528,11 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // Price input change
-    const priceInput = document.getElementById('price-input');
-    if (priceInput) {
-        priceInput.addEventListener('change', () => {
-            console.log(`💰 Price: ${priceInput.value} kr/kWh`);
-            if (connected) {
-                socket.emit('request_update', { range: currentTimeRange, price: parseFloat(priceInput.value) });
-            }
-        });
-    }
-
     // Chart selector change
     const chartSelector = document.getElementById('chart-selector');
     if (chartSelector) {
         chartSelector.addEventListener('change', (e) => {
+            prefs.set('chartType', e.target.value);
             if (window.switchChart) {
                 window.switchChart(e.target.value);
             }
@@ -468,6 +542,9 @@ document.addEventListener('DOMContentLoaded', () => {
     // Series toggles
     document.querySelectorAll('.series-toggle').forEach(toggle => {
         toggle.addEventListener('change', () => {
+            const series = prefs.get('series', {});
+            series[toggle.id] = toggle.checked;
+            prefs.set('series', series);
             if (window.updateSeriesVisibility) {
                 window.updateSeriesVisibility();
             }
@@ -496,7 +573,12 @@ async function loadSettings() {
         document.getElementById('setting-brand').value = settings.brand || 'thermia';
         document.getElementById('setting-flow-factor').value = settings.cop_flow_factor || 2.7;
         document.getElementById('setting-hw-min-cycle').value = settings.hw_min_cycle_minutes || 2;
-        document.getElementById('setting-electricity-price').value = settings.electricity_price || 2.0;
+        document.getElementById('setting-electricity-price').value = settings.electricity_price ?? 2.0;
+        document.getElementById('setting-price-mode').value = settings.price_mode || 'fixed';
+        document.getElementById('setting-price-area').value = settings.price_area || 'SE3';
+        document.getElementById('setting-price-markup').value = settings.price_markup ?? 0;
+        document.getElementById('setting-price-vat').checked = settings.price_vat !== false;
+        updatePriceModeFields();
         document.getElementById('setting-collection-interval').value = settings.collection_interval || 30;
         document.getElementById('setting-refresh-interval').value = settings.dashboard_refresh_interval || 30;
         document.getElementById('setting-retention-days').value = settings.retention_days || 90;
@@ -525,6 +607,15 @@ async function loadSettings() {
     }
 }
 
+function updatePriceModeFields() {
+    const spot = document.getElementById('setting-price-mode').value === 'spot';
+    document.querySelectorAll('.spot-only').forEach(el => el.classList.toggle('d-none', !spot));
+}
+document.addEventListener('DOMContentLoaded', () => {
+    const mode = document.getElementById('setting-price-mode');
+    if (mode) mode.addEventListener('change', updatePriceModeFields);
+});
+
 async function saveSettings() {
     const btn = document.getElementById('btn-save-settings');
     const alertEl = document.getElementById('settings-alert');
@@ -537,6 +628,10 @@ async function saveSettings() {
             cop_flow_factor: parseFloat(document.getElementById('setting-flow-factor').value),
             hw_min_cycle_minutes: parseInt(document.getElementById('setting-hw-min-cycle').value),
             electricity_price: parseFloat(document.getElementById('setting-electricity-price').value),
+            price_mode: document.getElementById('setting-price-mode').value,
+            price_area: document.getElementById('setting-price-area').value,
+            price_markup: parseFloat(document.getElementById('setting-price-markup').value),
+            price_vat: document.getElementById('setting-price-vat').checked,
             collection_interval: parseInt(document.getElementById('setting-collection-interval').value),
             dashboard_refresh_interval: parseInt(document.getElementById('setting-refresh-interval').value),
             retention_days: parseInt(document.getElementById('setting-retention-days').value)

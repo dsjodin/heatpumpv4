@@ -19,6 +19,8 @@ COPY providers/ ./providers/
 COPY dashboard/app.py .
 COPY dashboard/data_query.py .
 COPY dashboard/config_colors.py .
+COPY dashboard/pricing.py .
+COPY dashboard/daily_stats.py .
 COPY dashboard/templates/ templates/
 COPY dashboard/static/ static/
 

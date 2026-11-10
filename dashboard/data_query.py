@@ -117,8 +117,16 @@ class HeatPumpDataQuery:
         else:
             return "5m"  # Default
     
+    @staticmethod
+    def _range(time_range: str, start: Optional[str], stop: Optional[str]) -> str:
+        """Flux range() arguments: relative time_range, or absolute RFC3339 start/stop"""
+        if start:
+            return f'start: {start}, stop: {stop}' if stop else f'start: {start}'
+        return f'start: -{time_range}'
+
     def query_metrics(self, metric_names: List[str], time_range: str = '24h',
-                     aggregation_window: Optional[str] = None) -> pd.DataFrame:
+                     aggregation_window: Optional[str] = None,
+                     start: Optional[str] = None, stop: Optional[str] = None) -> pd.DataFrame:
         """
         Query metrics from InfluxDB
 
@@ -142,6 +150,7 @@ class HeatPumpDataQuery:
             # Använd angiven aggregering eller beräkna automatiskt
             if aggregation_window is None:
                 aggregation_window = self._get_aggregation_window(time_range)
+            rng = self._range(time_range, start, stop)
 
             # Value metrics with mean, status metrics with last (preserves 0/1 values).
             # The two queries are independent, so they run in parallel.
@@ -152,7 +161,7 @@ class HeatPumpDataQuery:
                 name_filter = ' or '.join([f'r.name == "{name}"' for name in names])
                 queries.append(f'''
                     from(bucket: "{self.bucket}")
-                        |> range(start: -{time_range})
+                        |> range({rng})
                         |> filter(fn: (r) => r._measurement == "heatpump")
                         |> filter(fn: (r) => {name_filter})
                         |> aggregateWindow(every: {aggregation_window}, fn: {fn}, createEmpty: false)
@@ -178,7 +187,8 @@ class HeatPumpDataQuery:
             return pd.DataFrame()
 
     def query_metrics_wide(self, metric_names: List[str], time_range: str = '24h',
-                           aggregation_window: Optional[str] = None) -> pd.DataFrame:
+                           aggregation_window: Optional[str] = None,
+                           start: Optional[str] = None, stop: Optional[str] = None) -> pd.DataFrame:
         """
         Query metrics from InfluxDB and return in WIDE format using DB-side pivot.
 
@@ -204,6 +214,7 @@ class HeatPumpDataQuery:
             # Determine aggregation window
             if aggregation_window is None:
                 aggregation_window = self._get_aggregation_window(time_range)
+            rng = self._range(time_range, start, stop)
 
             # Separate aggregation functions for status vs value fields
             # Status fields use 'last', value fields use 'mean'
@@ -219,13 +230,13 @@ class HeatPumpDataQuery:
 
                 query = f'''
                     value_data = from(bucket: "{self.bucket}")
-                        |> range(start: -{time_range})
+                        |> range({rng})
                         |> filter(fn: (r) => r._measurement == "heatpump")
                         |> filter(fn: (r) => {value_filter})
                         |> aggregateWindow(every: {aggregation_window}, fn: mean, createEmpty: false)
 
                     status_data = from(bucket: "{self.bucket}")
-                        |> range(start: -{time_range})
+                        |> range({rng})
                         |> filter(fn: (r) => r._measurement == "heatpump")
                         |> filter(fn: (r) => {status_filter})
                         |> aggregateWindow(every: {aggregation_window}, fn: last, createEmpty: false)
@@ -242,7 +253,7 @@ class HeatPumpDataQuery:
 
                 query = f'''
                     from(bucket: "{self.bucket}")
-                        |> range(start: -{time_range})
+                        |> range({rng})
                         |> filter(fn: (r) => r._measurement == "heatpump")
                         |> filter(fn: (r) => {value_filter})
                         |> aggregateWindow(every: {aggregation_window}, fn: mean, createEmpty: false)
@@ -257,7 +268,7 @@ class HeatPumpDataQuery:
 
                 query = f'''
                     from(bucket: "{self.bucket}")
-                        |> range(start: -{time_range})
+                        |> range({rng})
                         |> filter(fn: (r) => r._measurement == "heatpump")
                         |> filter(fn: (r) => {status_filter})
                         |> aggregateWindow(every: {aggregation_window}, fn: last, createEmpty: false)
@@ -331,6 +342,23 @@ class HeatPumpDataQuery:
             logger.error(f"Error getting latest values: {e}")
             return {}
     
+    def get_last_data_time(self):
+        """Time of the newest sample within 30 days (used when nothing arrived in the last hour)"""
+        query = f'''
+            from(bucket: "{self.bucket}")
+                |> range(start: -30d)
+                |> filter(fn: (r) => r._measurement == "heatpump" and r.name == "outdoor_temp")
+                |> last()
+        '''
+        try:
+            result = self.query_api.query_data_frame(query)
+            if isinstance(result, list):
+                result = pd.concat(result, ignore_index=True) if result else pd.DataFrame()
+            return result['_time'].max() if not result.empty else None
+        except Exception as e:
+            logger.error(f"Error getting last data time: {e}")
+            return None
+
     def get_stat_values(self, stat: str, time_range: str = '24h', names: Optional[List[str]] = None) -> Dict[str, float]:
         """min, max or mean per metric over raw data in the time range, for all metrics or only `names`.
         One query per stat (a union of all three lost values, see deeba5b), so they can run in parallel."""
@@ -732,12 +760,14 @@ class HeatPumpDataQuery:
             return "5m"
     
     def calculate_energy_costs(self, time_range: str = '24h', price_per_kwh: float = 2.0,
-                               df: Optional[pd.DataFrame] = None) -> Dict[str, Any]:
+                               df: Optional[pd.DataFrame] = None,
+                               prices: Optional[pd.Series] = None) -> Dict[str, Any]:
         """
         Calculate energy consumption and costs
 
         KORREKT: Använder verklig tid mellan datapunkter
         df: pre-fetched query_metrics() frame for the same range (skips the query)
+        prices: kr/kWh per interval start (pricing.price_series); price_per_kwh is used where missing
         """
         try:
             if df is None:
@@ -749,6 +779,7 @@ class HeatPumpDataQuery:
                 return {
                     'total_kwh': 0,
                     'total_cost': 0,
+                    'avg_price': 0,
                     'avg_power': 0,
                     'peak_power': 0
                 }
@@ -763,14 +794,25 @@ class HeatPumpDataQuery:
             # Energy = Power (W) * Time (h) / 1000 (to get kWh)
             df['energy_kwh'] = (df['_value'] * df['time_diff_hours']) / 1000
             
+            # Energy in a sample belongs to the interval it ends in (it was used since the previous sample)
+            if prices is not None and not prices.empty:
+                p = prices.rename('price').rename_axis('_time').reset_index()
+                p['_time'] = pd.to_datetime(p['_time'], utc=True).astype('datetime64[ns, UTC]')
+                df['_time'] = pd.to_datetime(df['_time'], utc=True).astype('datetime64[ns, UTC]')
+                df = pd.merge_asof(df, p.sort_values('_time'), on='_time', direction='backward')
+                price = df['price'].fillna(price_per_kwh)
+            else:
+                price = price_per_kwh
+
             total_kwh = df['energy_kwh'].sum()
-            total_cost = total_kwh * price_per_kwh
+            total_cost = (df['energy_kwh'] * price).sum()
             avg_power = df['_value'].mean()
             peak_power = df['_value'].max()
             
             return {
                 'total_kwh': round(total_kwh, 2),
                 'total_cost': round(total_cost, 2),
+                'avg_price': round(total_cost / total_kwh, 2) if total_kwh > 0 else 0,
                 'avg_power': round(avg_power, 0),
                 'peak_power': round(peak_power, 0)
             }
@@ -780,6 +822,7 @@ class HeatPumpDataQuery:
             return {
                 'total_kwh': 0,
                 'total_cost': 0,
+                'avg_price': 0,
                 'avg_power': 0,
                 'peak_power': 0
             }

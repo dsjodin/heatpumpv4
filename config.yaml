@@ -51,7 +51,18 @@ influxdb:
 
 # Electricity Price
 # -----------------
-electricity_price: 2.0  # kr/kWh
+# mode: spot  -> spot price per 15 min/hour from elprisetjustnu.se for your price area,
+#                cost = (spot + markup) x 1.25 if vat
+# mode: fixed -> electricity_price below for all hours
+price:
+  mode: spot
+  area: SE3      # SE1, SE2, SE3 or SE4
+  markup: 0.0    # kr/kWh excl. VAT: grid fee + energy tax + supplier markup
+  vat: true
+electricity_price: 2.0  # kr/kWh incl. everything; fixed price, and fallback when spot is missing
+
+# Local time zone for daily statistics
+timezone: Europe/Stockholm
 
 # Data Retention Settings
 # -----------------------

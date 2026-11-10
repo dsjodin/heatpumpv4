@@ -41,6 +41,11 @@
                         </a>
                     </li>
                     <li class="nav-item">
+                        <a class="nav-link" href="#" data-view="stats" id="tab-stats">
+                            <i class="fas fa-chart-bar me-1"></i> Statistik
+                        </a>
+                    </li>
+                    <li class="nav-item">
                         <a class="nav-link" href="#" data-view="settings" id="tab-settings">
                             <i class="fas fa-cog me-1"></i> Inställningar
                         </a>
@@ -49,7 +54,7 @@
             </div>
             <div class="d-flex align-items-center gap-3">
                 <span class="badge connection-badge" id="connection-status">Ansluter...</span>
-                <span class="text-white small" id="last-update">--</span>
+                <span class="text-white small" id="last-update" title="Tid för senaste mätvärdet">--</span>
                 <span class="text-white-50 small" id="version-info" title="Dashboard version">--</span>
                 <button class="btn btn-sm btn-outline-light" id="btn-refresh">
                     <i class="fas fa-sync-alt"></i>
@@ -57,6 +62,17 @@
             </div>
         </div>
     </nav>
+
+    <!-- Shown when no new samples have arrived for a while -->
+    <div id="stale-banner" class="alert alert-danger stale-banner d-none mb-0 rounded-0" role="alert">
+        <i class="fas fa-exclamation-triangle me-2"></i>
+        <strong>Ingen ny data</strong> från värmepumpen sedan <span id="stale-since">--</span>.
+        Värdena nedan är inte aktuella. Kontrollera att gatewayen (H66_IP) svarar och att collectorn körs.
+        <button class="btn btn-sm btn-light ms-2" id="btn-stale-restart">
+            <i class="fas fa-sync-alt me-1"></i>Starta om collector
+        </button>
+        <span class="ms-2 small" id="stale-restart-result"></span>
+    </div>
 
     <!-- Status Bar (visible in both views) -->
     <div class="status-bar">
@@ -234,7 +250,7 @@
                         </div>
                         <div class="col-4">
                             <div class="metric-card metric-energy">
-                                <div class="metric-label"><i class="fas fa-plug"></i> Energi</div>
+                                <div class="metric-label"><i class="fas fa-plug"></i> Energi idag</div>
                                 <div class="metric-value" id="panel-energy-today">-- kWh</div>
                             </div>
                         </div>
@@ -243,7 +259,7 @@
                     <div class="row g-2">
                         <div class="col-3">
                             <div class="metric-card metric-cost">
-                                <div class="metric-label"><i class="fas fa-coins"></i> Kostnad</div>
+                                <div class="metric-label"><i class="fas fa-coins"></i> Kostnad idag</div>
                                 <div class="metric-value" id="panel-cost-today">-- kr</div>
                             </div>
                         </div>
@@ -317,14 +333,11 @@
                                     <select id="chart-selector" class="form-select form-select-sm">
                                         <option value="temperature">Temperaturer</option>
                                         <option value="power">Effekt</option>
+                                        <option value="cop">COP</option>
                                         <option value="energy">Energiflöde</option>
                                     </select>
                                 </div>
-                                <div class="col-md-2">
-                                    <label class="form-label small mb-1">Elpris (kr/kWh)</label>
-                                    <input type="number" id="price-input" class="form-control form-control-sm" value="2.0" min="0" max="10" step="0.1">
-                                </div>
-                                <div class="col-md-5">
+                                <div class="col-md-7">
                                     <label class="form-label small mb-1">Överlägg (visa på/av perioder)</label>
                                     <div class="d-flex flex-wrap gap-2">
                                         <div class="form-check form-check-inline">
@@ -488,6 +501,90 @@
         </div>
     </div>
 
+    <!-- ==================== STATISTIK VIEW ==================== -->
+    <div id="view-stats" class="view-content" style="display: none;">
+        <div class="container-fluid px-3 py-3">
+            <div class="card mb-3">
+                <div class="card-body py-2">
+                    <div class="row g-2 align-items-end">
+                        <div class="col-6 col-md-3">
+                            <label class="form-label small mb-1" for="stats-group">Visa</label>
+                            <select id="stats-group" class="form-select form-select-sm">
+                                <option value="day">Per dag</option>
+                                <option value="month">Per månad</option>
+                            </select>
+                        </div>
+                        <div class="col-6 col-md-3">
+                            <label class="form-label small mb-1" for="stats-days">Period</label>
+                            <select id="stats-days" class="form-select form-select-sm">
+                                <option value="30">30 dagar</option>
+                                <option value="90">90 dagar</option>
+                                <option value="365">12 månader</option>
+                                <option value="0">All historik</option>
+                            </select>
+                        </div>
+                        <div class="col-12 col-md-6 small text-muted" id="stats-info">
+                            Statistik per dygn sparas utan tidsgräns, även efter att rådata rensats.
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="stats-empty" class="alert alert-info d-none">
+                <i class="fas fa-hourglass-half me-2"></i>Dagsstatistiken räknas fram i bakgrunden. Det kan ta några minuter efter första starten.
+            </div>
+
+            <!-- KPI cards: value for the period and change against the period before -->
+            <div class="row g-2 mb-3" id="stats-kpis"></div>
+
+            <div class="card mb-3">
+                <div class="card-header py-2"><i class="fas fa-bolt me-2"></i>Energi och kostnad</div>
+                <div class="card-body p-2"><div id="stats-energy-chart" class="stats-chart"></div></div>
+            </div>
+
+            <div class="row g-3 mb-3">
+                <div class="col-lg-6">
+                    <div class="card h-100">
+                        <div class="card-header py-2"><i class="fas fa-house-chimney me-2"></i>Energisignatur</div>
+                        <div class="card-body p-2">
+                            <div class="small text-muted px-2" id="signature-text">--</div>
+                            <div id="stats-signature-chart" class="stats-chart"></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-lg-6">
+                    <div class="card h-100">
+                        <div class="card-header py-2"><i class="fas fa-water me-2"></i>Borrhål (köldbärare per dygn)</div>
+                        <div class="card-body p-2">
+                            <div class="small text-muted px-2" id="brine-text">--</div>
+                            <div id="stats-brine-chart" class="stats-chart"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header py-2 collapsible-header" data-bs-toggle="collapse" data-bs-target="#stats-table-collapse">
+                    <i class="fas fa-table me-2"></i>Tabell
+                    <i class="fas fa-chevron-down float-end collapse-icon"></i>
+                </div>
+                <div class="collapse" id="stats-table-collapse">
+                    <div class="card-body p-0 table-responsive">
+                        <table class="table table-sm table-striped mb-0 stats-table">
+                            <thead>
+                                <tr>
+                                    <th>Datum</th><th>kWh</th><th>kr</th><th>COP</th><th>Ute °C</th>
+                                    <th>KB in °C</th><th>Starter</th><th>VV-cykler</th><th>Tillsats h</th>
+                                </tr>
+                            </thead>
+                            <tbody id="stats-table-body"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Settings View -->
     <div id="view-settings" class="view-content" style="display: none;">
         <div class="container-fluid py-3">
@@ -527,9 +624,47 @@
                                 <input type="number" class="form-control" id="setting-hw-min-cycle" step="1" min="0" max="60">
                                 <div class="form-text">Cykler kortare än detta filtreras bort (undviker sensorbrus)</div>
                             </div>
+                        </div>
+                    </div>
+
+                    <!-- Elpris -->
+                    <div class="card mb-3">
+                        <div class="card-header"><i class="fas fa-coins me-2"></i>Elpris</div>
+                        <div class="card-body">
                             <div class="mb-3">
-                                <label for="setting-electricity-price" class="form-label">Elpris (kr/kWh)</label>
+                                <label for="setting-price-mode" class="form-label">Prisläge</label>
+                                <select class="form-select" id="setting-price-mode">
+                                    <option value="spot">Spotpris (per kvart/timme)</option>
+                                    <option value="fixed">Fast pris</option>
+                                </select>
+                                <div class="form-text">Spotpris hämtas från elprisetjustnu.se för ditt elområde.</div>
+                            </div>
+                            <div class="row spot-only">
+                                <div class="col-sm-4 mb-3">
+                                    <label for="setting-price-area" class="form-label">Elområde</label>
+                                    <select class="form-select" id="setting-price-area">
+                                        <option value="SE1">SE1 Luleå</option>
+                                        <option value="SE2">SE2 Sundsvall</option>
+                                        <option value="SE3">SE3 Stockholm</option>
+                                        <option value="SE4">SE4 Malmö</option>
+                                    </select>
+                                </div>
+                                <div class="col-sm-5 mb-3">
+                                    <label for="setting-price-markup" class="form-label">Påslag (kr/kWh exkl. moms)</label>
+                                    <input type="number" class="form-control" id="setting-price-markup" step="0.01" min="0" max="10">
+                                </div>
+                                <div class="col-sm-3 mb-3 d-flex align-items-end">
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="setting-price-vat">
+                                        <label class="form-check-label" for="setting-price-vat">Moms 25%</label>
+                                    </div>
+                                </div>
+                                <div class="col-12 form-text mt-n2 mb-3">Påslag = elnätets överföringsavgift + energiskatt + elhandlarens påslag. Kostnad = (spot + påslag) × 1,25 med moms.</div>
+                            </div>
+                            <div class="mb-0">
+                                <label for="setting-electricity-price" class="form-label">Fast pris (kr/kWh inkl. allt)</label>
                                 <input type="number" class="form-control" id="setting-electricity-price" step="0.1" min="0" max="100">
+                                <div class="form-text">Används i läget fast pris, och för timmar där spotpris saknas.</div>
                             </div>
                         </div>
                     </div>
@@ -664,6 +799,7 @@
     <script src="{{ url_for('static', filename='js/schema.js') }}"></script>
     <script src="{{ url_for('static', filename='js/socket-client.js') }}"></script>
     <script src="{{ url_for('static', filename='js/charts.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/stats.js') }}"></script>
     <script src="{{ url_for('static', filename='js/debug.js') }}"></script>
 </body>
 </html>
