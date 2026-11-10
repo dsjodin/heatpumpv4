@@ -1007,3 +1007,81 @@ body {
 @media (max-width: 900px) {
     .sed-main { grid-template-columns: 1fr; }
 }
+
+/* ==================== Stale data warning ==================== */
+.stale-banner {
+    font-size: 0.9rem;
+    padding: 0.5rem 1rem;
+}
+
+.stale-text {
+    color: #ffc9c9 !important;
+    font-weight: 600;
+}
+
+.schema-stale {
+    opacity: 0.45;
+    filter: grayscale(0.8);
+}
+
+/* ==================== Statistik view ==================== */
+.stats-chart {
+    height: 340px;
+    width: 100%;
+}
+
+.stats-kpi {
+    background: var(--color-card);
+    border: 1px solid var(--color-border);
+    border-radius: 8px;
+    padding: 0.6rem 0.75rem;
+    height: 100%;
+    box-shadow: var(--shadow-sm);
+}
+
+.stats-kpi-label {
+    font-size: 0.7rem;
+    color: #636e72;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.stats-kpi-value {
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: #2d3436;
+    white-space: nowrap;
+}
+
+.stats-kpi-value small {
+    font-size: 0.75rem;
+    font-weight: 500;
+    color: #636e72;
+}
+
+.stats-change {
+    font-size: 0.75rem;
+    color: var(--color-text-muted);
+}
+
+.stats-change.change-good {
+    color: #2b8a3e;
+    font-weight: 600;
+}
+
+.stats-change.change-bad {
+    color: #c92a2a;
+    font-weight: 600;
+}
+
+.stats-table td,
+.stats-table th {
+    white-space: nowrap;
+    font-size: 0.85rem;
+}
+
+@media (max-width: 576px) {
+    .stats-chart {
+        height: 280px;
+    }
+}

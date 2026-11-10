@@ -68,6 +68,7 @@ Access dashboard at: http://localhost:8050
 - **API Endpoints**:
   - `GET /api/config` - Dashboard configuration
   - `GET /api/initial-data?range=24h` - Initial data load for all charts
+  - `GET /api/stats?group=day|month&days=30|90|365|0` - Daily/monthly statistics, energy signature, borehole trend
 
 - **WebSocket Events**:
   - `connect` - Client connection established
@@ -165,8 +166,20 @@ All charts + KPIs refresh automatically
 | `INFLUXDB_TOKEN` | - | InfluxDB authentication token (required) |
 | `INFLUXDB_ORG` | `thermia` | InfluxDB organization |
 | `INFLUXDB_BUCKET` | `heatpump` | InfluxDB bucket name |
+| `INFLUXDB_LONGTERM_BUCKET` | `heatpump_longterm` | Daily statistics and spot prices, no retention (created automatically) |
 | `HEATPUMP_BRAND` | `thermia` | Heat pump brand (thermia, ivt, nibe) |
 | `SECRET_KEY` | auto-generated | Flask secret key (set in production) |
+
+### Statistik and electricity price
+
+- One row per local day (`timezone` in config.yaml) is computed in the background and stored in the
+  long-term bucket, so history survives the raw data retention. Days are backfilled from the raw data
+  at startup; today is recomputed every 15 minutes.
+- `price.mode: spot` fetches the spot price per 15 min/hour for `price.area` from elprisetjustnu.se.
+  Cost = (spot + `price.markup`) x 1.25 when `price.vat` is true. `electricity_price` is used in fixed
+  mode and for hours without spot price. Changing the price recomputes the days still in the raw data.
+- The header shows the time of the newest sample. If nothing has arrived for 3x the collection interval
+  (at least 2 minutes) a warning banner is shown.
 
 ### Brand Configuration
 

@@ -221,6 +221,14 @@
             display: none;
         }
 
+        .alarm-banner.stale {
+            background: linear-gradient(135deg, #f08c00 0%, #e8590c 100%);
+        }
+
+        .alarm-banner.stale.active {
+            animation: none;
+        }
+
         .alarm-banner.active {
             display: block;
             animation: pulse-alarm 2s infinite;
@@ -355,6 +363,12 @@
         <div class="alarm-banner" id="alarm-banner">
             <h3><i class="fas fa-exclamation-triangle me-2"></i>LARM AKTIVT</h3>
             <p id="alarm-description">--</p>
+        </div>
+
+        <!-- Shown when no new samples have arrived for a while -->
+        <div class="alarm-banner stale" id="stale-banner">
+            <h3><i class="fas fa-plug-circle-xmark me-2"></i>Ingen ny data</h3>
+            <p class="mb-0">Senaste mätvärde: <span id="stale-since">--</span>. Kontrollera gateway och collector.</p>
         </div>
 
         <!-- Temperature Cards -->
@@ -574,10 +588,29 @@
                 alarmBanner.classList.remove('active');
             }
 
-            // Last update time
-            document.getElementById('last-update').textContent =
-                `Uppdaterad: ${new Date().toLocaleTimeString('sv-SE')}`;
+            dataTime = data.status.data_time ? new Date(data.status.data_time) : null;
+            staleAfterSeconds = data.status.stale_after_seconds || 120;
+            hasData = true;
+            updateDataAge();
         }
+
+        // Time of the newest sample; re-evaluated on a timer so the warning shows without new pushes
+        let dataTime = null;
+        let staleAfterSeconds = 120;
+        let hasData = false;
+        function updateDataAge() {
+            if (!hasData) return;
+            const age = dataTime ? (Date.now() - dataTime.getTime()) / 1000 : Infinity;
+            const stale = age > staleAfterSeconds;
+            const when = !dataTime ? 'över 30 dagar sedan'
+                : dataTime.toDateString() === new Date().toDateString() ? dataTime.toLocaleTimeString('sv-SE')
+                : dataTime.toLocaleString('sv-SE', { dateStyle: 'short', timeStyle: 'short' });
+            document.getElementById('last-update').textContent = `Data: ${when}`;
+            document.getElementById('stale-since').textContent =
+                dataTime ? `${when} (${Math.round(age / 60)} min sedan)` : when;
+            document.getElementById('stale-banner').classList.toggle('active', stale);
+        }
+        setInterval(updateDataAge, 15000);
 
         function updateTemp(elementId, tempData) {
             const el = document.getElementById(elementId);

@@ -22,10 +22,10 @@ import yaml
 import math
 import pandas as pd
 import numpy as np
-from datetime import datetime
+from datetime import datetime, timedelta
 
 # Version info - increment when making changes
-VERSION = '1.2.0'
+VERSION = '1.3.0'
 BUILD_TIME = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
 from influxdb_client.domain.bucket_retention_rules import BucketRetentionRules
@@ -37,6 +37,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from providers import get_provider, get_supported_brands
 from data_query import HeatPumpDataQuery, load_config, CONFIG_PATH
+from pricing import SpotPrices, price_config, local_tz, AREAS
+from daily_stats import DailyStats
 from config_colors import THERMIA_COLORS
 
 # Setup logging
@@ -80,6 +82,9 @@ def load_provider():
 # Initialize global objects
 provider = load_provider()
 data_query = HeatPumpDataQuery()
+LONGTERM_BUCKET = os.getenv('INFLUXDB_LONGTERM_BUCKET', 'heatpump_longterm')
+spot_prices = SpotPrices(data_query, LONGTERM_BUCKET)
+daily_stats = DailyStats(data_query, spot_prices, LONGTERM_BUCKET)
 
 # Store connected clients and their time ranges
 connected_clients = {}
@@ -254,6 +259,10 @@ def get_settings():
         'collection_interval': config.get('collection', {}).get('interval_seconds', 30),
         'dashboard_refresh_interval': config.get('dashboard', {}).get('refresh_interval', 30),
         'electricity_price': config.get('electricity_price', 2.0),
+        'price_mode': price_config()['mode'],
+        'price_area': price_config()['area'],
+        'price_markup': price_config()['markup'],
+        'price_vat': price_config()['vat'],
         'retention_days': config.get('retention', {}).get('days', 90),
         'current_retention_days': current_retention_days,
         'system': {
@@ -321,6 +330,26 @@ def save_settings():
         if val is not None:
             config['electricity_price'] = round(val, 2)
 
+    if 'price_mode' in data:
+        if data['price_mode'] not in ('spot', 'fixed'):
+            errors.append(f"Prisläge: okänt värde {data['price_mode']!r}")
+        else:
+            config.setdefault('price', {})['mode'] = data['price_mode']
+
+    if 'price_area' in data:
+        if data['price_area'] not in AREAS:
+            errors.append(f"Elområde: okänt värde {data['price_area']!r}")
+        else:
+            config.setdefault('price', {})['area'] = data['price_area']
+
+    if 'price_markup' in data:
+        val = number('price_markup', float, 0, 10, 'Påslag')
+        if val is not None:
+            config.setdefault('price', {})['markup'] = round(val, 3)
+
+    if 'price_vat' in data:
+        config.setdefault('price', {})['vat'] = bool(data['price_vat'])
+
     if 'retention_days' in data:
         val = number('retention_days', int, 0, 365, 'Lagring')
         if val is not None:
@@ -331,6 +360,9 @@ def save_settings():
 
     if errors:
         return jsonify({'success': False, 'message': '; '.join(errors), 'errors': errors}), 400
+
+    old = load_config()
+    price_changed = (old.get('price'), old.get('electricity_price')) != (config.get('price'), config.get('electricity_price'))
 
     # Write config
     try:
@@ -343,6 +375,12 @@ def save_settings():
     if 'retention_days' in data:
         retention_days = config.get('retention', {}).get('days', 90)
         set_bucket_retention(retention_days)
+
+    # Costs in the daily stats follow the new price (for days still in the raw data)
+    if price_changed:
+        _dashboard_cache.clear()
+        daily_stats.invalidate()
+        eventlet.spawn(daily_stats.update)
 
     return jsonify({
         'success': True,
@@ -688,8 +726,10 @@ def fetch_all_data_batch(time_range):
     cached_hot_water_stats = results['hot_water']
     cached_alarm_status = data_query.get_alarm_status_from_df(df)
     cached_events = data_query.get_event_log_from_df(df, limit=20)
-    price_per_kwh = load_config().get('electricity_price', 2.0)
-    energy_costs = data_query.calculate_energy_costs(time_range, price_per_kwh, df=df)
+    now = datetime.now(local_tz())
+    hours = int(time_range[:-1]) * (24 if time_range.endswith('d') else 1)
+    prices = spot_prices.price_series(now - timedelta(hours=hours), now)
+    energy_costs = data_query.calculate_energy_costs(time_range, price_config()['fixed'], df=df, prices=prices)
 
     data = {
         'cop': get_cop_data_from_pivot(cached_cop_df),
@@ -752,11 +792,12 @@ def _cached(cache, key, max_age, compute):
 
 def get_dashboard_data(time_range):
     latest_thread = eventlet.spawn(_cached, _latest_cache, 'latest', _refresh_age(), data_query.get_latest_values)
+    today_thread = eventlet.spawn(daily_stats.today)
     heavy = _cached(_dashboard_cache, time_range, _range_max_age(time_range),
                     lambda: fetch_all_data_batch(time_range))
     latest = latest_thread.wait()
     status = get_status_data_fully_cached(heavy['cop_df'], heavy['min_max'], latest, heavy['alarm'])
-    return dict(heavy['data'], status=clean_nan_values(status))
+    return dict(heavy['data'], status=clean_nan_values(status), today=clean_nan_values(today_thread.wait()))
 
 
 # Helper functions to extract data from pre-pivoted dataframe
@@ -1105,6 +1146,20 @@ def get_initial_data():
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api/stats')
+def get_stats():
+    """Daily/monthly statistics from the long-term bucket"""
+    group = request.args.get('group', 'day')
+    days = request.args.get('days', '30')
+    if group not in ('day', 'month') or days not in ('30', '90', '365', '0'):
+        return jsonify({'error': 'Ogiltig gruppering eller period'}), 400
+    try:
+        return jsonify(clean_nan_values(daily_stats.stats(group, int(days))))
+    except Exception as e:
+        logger.error(f"❌ Error building stats: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
 # ==================== Data Extraction Functions ====================
 
 
@@ -1232,6 +1287,10 @@ def get_status_data_fully_cached(cached_cop_df, cached_min_max, cached_latest_va
         elif current_metrics.get('hot_gas_compressor', {}).get('value') is not None:
             hotgas_temp = round(current_metrics.get('hot_gas_compressor', {}).get('value'), 1)
 
+        # Time of the newest sample, so the client can tell live data from a stopped collector
+        times = [m['time'] for m in current_metrics.values() if m.get('time') is not None]
+        data_time = max(times) if times else data_query.get_last_data_time()
+
         # Get Integral (degree_minutes) value
         degree_minutes = None
         if current_metrics.get('degree_minutes', {}).get('value') is not None:
@@ -1265,6 +1324,8 @@ def get_status_data_fully_cached(cached_cop_df, cached_min_max, cached_latest_va
                 'degree_minutes': degree_minutes  # Integral value
             },
             'latest': {name: m.get('value') for name, m in current_metrics.items()},
+            'data_time': data_time.isoformat() if data_time is not None else None,
+            'stale_after_seconds': max(3 * int(load_config().get('collection', {}).get('interval_seconds', 30)), 120),
             'timestamp': datetime.now().isoformat()
         }
 
@@ -1444,6 +1505,7 @@ if __name__ == '__main__':
 
     socketio.background_task_started = True
     socketio.start_background_task(background_updates)
+    socketio.start_background_task(daily_stats.run)
 
     socketio.run(
         app,
