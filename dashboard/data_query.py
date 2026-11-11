@@ -639,10 +639,12 @@ class HeatPumpDataQuery:
                 logger.warning("No power consumption data available for COP calculation")
                 return pd.DataFrame()
 
-            # Sort by time and calculate time differences
+            # Each row is a mean over one aggregation window, so it covers one window length.
+            # Using the gap to the previous row would give a row after a data outage far too much weight.
             df = df.sort_values('_time').reset_index(drop=True)
-            df['time_diff_hours'] = df['_time'].diff().dt.total_seconds() / 3600
-            df['time_diff_hours'] = df['time_diff_hours'].fillna(0).clip(0, 0.5)  # Cap at 30 min max
+            dt = df['_time'].diff().dt.total_seconds() / 3600
+            step = dt.median()
+            df['time_diff_hours'] = dt.clip(upper=step).fillna(step)
 
             # Valid mask: compressor running and valid data
             if has_compressor:
@@ -655,6 +657,12 @@ class HeatPumpDataQuery:
                 (df['radiator_delta'].fillna(0) > 0.5) &
                 (df['power_consumption'].fillna(0) > 100)
             )
+
+            # Radiator sensors sit after the switch valve and see none of the hot water heat,
+            # so hot water windows (and the window where a cycle ended) would only add electricity
+            if forward_col == 'radiator_forward' and 'switch_valve_status' in df.columns:
+                hw = df['switch_valve_status'].fillna(0) > 0
+                valid_mask &= ~(hw | hw.shift(1, fill_value=False))
 
             df['heat_kwh'] = 0.0
             df['elec_kwh'] = 0.0
@@ -685,37 +693,23 @@ class HeatPumpDataQuery:
                 'power_consumption': 'mean'
             }).reset_index()
 
-            # Calculate interval COP = Σ heat / Σ electricity
-            interval_df['estimated_cop'] = None
-            valid_intervals = interval_df['elec_kwh'] > 0.01  # At least some electricity used
+            # Interval COP = Σ heat / Σ electricity
+            valid_intervals = interval_df['elec_kwh'] > 0.01
+            interval_df['estimated_cop'] = (interval_df['heat_kwh'] / interval_df['elec_kwh']).where(valid_intervals)
 
-            interval_df.loc[valid_intervals, 'estimated_cop'] = (
-                interval_df.loc[valid_intervals, 'heat_kwh'] /
-                interval_df.loc[valid_intervals, 'elec_kwh']
-            )
-
-            # Log COP for diagnostics
-            if valid_intervals.any():
-                raw_cop_mean = interval_df.loc[valid_intervals, 'estimated_cop'].mean()
-                raw_cop_max = interval_df.loc[valid_intervals, 'estimated_cop'].max()
-                logger.info(f"calculate_cop_from_pivot: COP - mean: {raw_cop_mean:.2f}, max: {raw_cop_max:.2f}")
-
-            # No hard clamping - but filter extreme outliers that indicate sensor malfunction
-            extreme_cop = interval_df['estimated_cop'].notna() & (interval_df['estimated_cop'] > 15)
+            # COP > 15 means a sensor error: drop the interval from the period totals as well
+            extreme_cop = interval_df['estimated_cop'] > 15
             if extreme_cop.any():
                 logger.warning(f"COP outliers detected: {extreme_cop.sum()} intervals with COP > 15 (likely sensor error, filtered)")
-                interval_df.loc[extreme_cop, 'estimated_cop'] = None
+                interval_df.loc[extreme_cop, ['heat_kwh', 'elec_kwh']] = 0.0
+                interval_df.loc[extreme_cop, 'estimated_cop'] = np.nan
 
-            # Calculate cumulative/seasonal COP
+            # Period COP so far = Σ heat / Σ electricity since the start of the range
             interval_df['cumulative_heat'] = interval_df['heat_kwh'].cumsum()
             interval_df['cumulative_elec'] = interval_df['elec_kwh'].cumsum()
-            interval_df['seasonal_cop'] = None
-
-            cumulative_valid = interval_df['cumulative_elec'] > 0.1
-            interval_df.loc[cumulative_valid, 'seasonal_cop'] = (
-                interval_df.loc[cumulative_valid, 'cumulative_heat'] /
-                interval_df.loc[cumulative_valid, 'cumulative_elec']
-            )
+            interval_df['seasonal_cop'] = (
+                interval_df['cumulative_heat'] / interval_df['cumulative_elec']
+            ).where(interval_df['cumulative_elec'] > 0.1)
 
             # Rename interval column to _time for compatibility
             interval_df = interval_df.rename(columns={'interval': '_time'})

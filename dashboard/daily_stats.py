@@ -20,12 +20,14 @@ logger = logging.getLogger(__name__)
 
 UPDATE_SECONDS = 900
 TODAY_MAX_AGE = 60
+CALC_VERSION = 2  # bump when the calculations change so stored days are recomputed
 
 RUNTIME_METRICS = ['compressor_status', 'additional_heat_percent', 'switch_valve_status', 'power_consumption']
 WIDE_METRICS = [
     'outdoor_temp', 'indoor_temp', 'radiator_forward', 'radiator_return',
     'heat_carrier_forward', 'heat_carrier_return', 'hot_water_top',
     'brine_in_evaporator', 'brine_out_condenser', 'compressor_status', 'power_consumption',
+    'switch_valve_status',
 ]
 SUM_FIELDS = ['energy_kwh', 'cost_kr', 'heat_kwh', 'cop_elec_kwh', 'compressor_hours',
               'compressor_starts', 'aux_hours', 'hw_cycles', 'hw_kwh']
@@ -86,7 +88,7 @@ class DailyStats:
 
         df = self.dq.query_metrics(RUNTIME_METRICS, aggregation_window='1m', start=s, stop=e)
         wide = self.dq.query_metrics_wide(WIDE_METRICS, aggregation_window='5m', start=s, stop=e)
-        row = {'final': now >= end}
+        row = {'final': now >= end, 'calc_version': CALC_VERSION}
         if df.empty and wide.empty:
             return dict(row, coverage_pct=0.0)
 
@@ -183,9 +185,13 @@ class DailyStats:
         if first is None:
             return
         stored = self.read_all()
-        done = set(stored.loc[stored['final'] == True, 'date']) if 'final' in stored.columns else set()  # noqa: E712
+        final = set(stored.loc[stored['final'] == True, 'date']) if 'final' in stored.columns else set()  # noqa: E712
+        current = set(stored.loc[stored['calc_version'] == CALC_VERSION, 'date']) if 'calc_version' in stored.columns else set()
+        done = final & current
         if self._force:
             done, self._force = set(), False
+        # The first raw day may be cut by retention: keep a stored final row for it
+        done |= final & {first}
         today = datetime.now(local_tz()).date()
         day = first
         while day <= today:
