@@ -363,6 +363,7 @@ def save_settings():
 
     old = load_config()
     price_changed = (old.get('price'), old.get('electricity_price')) != (config.get('price'), config.get('electricity_price'))
+    cop_changed = old.get('cop') != config.get('cop')
 
     # Write config
     try:
@@ -376,8 +377,8 @@ def save_settings():
         retention_days = config.get('retention', {}).get('days', 90)
         set_bucket_retention(retention_days)
 
-    # Costs in the daily stats follow the new price (for days still in the raw data)
-    if price_changed:
+    # Costs and COP in the daily stats follow the new settings (for days still in the raw data)
+    if price_changed or cop_changed:
         _dashboard_cache.clear()
         daily_stats.invalidate()
         eventlet.spawn(daily_stats.update)
@@ -683,7 +684,7 @@ def fetch_all_data_batch(time_range):
         'outdoor_temp', 'indoor_temp', 'radiator_forward', 'radiator_return',
         'heat_carrier_forward', 'heat_carrier_return',  # IVT alternative for radiator temps
         'hot_water_top', 'brine_in_evaporator', 'brine_out_condenser',
-        'compressor_status', 'power_consumption',
+        'compressor_status', 'power_consumption', 'switch_valve_status',
         'pressure_tube_temp', 'hot_gas_compressor',  # Hetgas: Thermia uses pressure_tube_temp, IVT uses hot_gas_compressor
         'degree_minutes'  # Integral for Thermia
     ]
@@ -818,8 +819,8 @@ def get_cop_data_from_pivot(df_cop):
         if 'seasonal_cop' in df_cop.columns:
             seasonal_values = df_cop['seasonal_cop'].replace({float('nan'): None}).tolist()
 
-        # Calculate average only from non-NaN values
-        avg_cop = float(df_cop['estimated_cop'].mean()) if not df_cop['estimated_cop'].isna().all() else 0
+        elec = df_cop['elec_kwh'].sum()
+        avg_cop = float(df_cop['heat_kwh'].sum() / elec) if elec > 0.1 else 0
 
         return {
             'timestamps': timestamps,
@@ -1181,10 +1182,10 @@ def get_sankey_data_cached(cached_cop_df, cached_runtime_stats):
     """Build Sankey diagram data using pre-calculated COP and runtime stats (avoids redundant InfluxDB queries)"""
     try:
         # Calculate energy flows (same logic as Plotly version)
-        cop_values = cached_cop_df['estimated_cop'].dropna() if 'estimated_cop' in cached_cop_df.columns else pd.Series(dtype=float)
-        if cop_values.empty:
+        elec = cached_cop_df['elec_kwh'].sum() if 'elec_kwh' in cached_cop_df.columns else 0
+        if elec <= 0.1:
             return {'nodes': [], 'links': [], 'cop': None, 'free_energy_percent': 0, 'has_data': False}
-        avg_cop = float(cop_values.mean())
+        avg_cop = float(cached_cop_df['heat_kwh'].sum() / elec)
         has_data = True
 
         # Calculate energy flows (normalized to 100 units electric power)
