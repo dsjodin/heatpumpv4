@@ -65,6 +65,15 @@ Access dashboard at: http://localhost:8050
 - **Test Dashboard**: http://localhost:8050/test
   - Minimal test interface with 2 charts and console logging
 
+- **Live Schema (embed)**: http://localhost:8050/embed
+  - Only the live system schema, for iframes such as a Home Assistant Webpage card:
+    ```yaml
+    type: iframe
+    url: http://<dashboard-ip>:8050/embed
+    aspect_ratio: 58%
+    ```
+  - If Home Assistant is opened over https (e.g. Nabu Casa), the browser blocks the http iframe; serve the dashboard over https too.
+
 - **API Endpoints**:
   - `GET /api/config` - Dashboard configuration
   - `GET /api/initial-data?range=24h` - Initial data load for all charts

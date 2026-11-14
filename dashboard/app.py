@@ -172,6 +172,14 @@ def mobile():
                          dashboard_title=provider.get_dashboard_title())
 
 
+@app.route('/embed')
+def embed():
+    """Live schema only, for iframes (e.g. Home Assistant Webpage card)"""
+    return render_template('embed.html',
+                         dashboard_title=provider.get_dashboard_title(),
+                         schema=provider.get_schema_layout())
+
+
 @app.route('/api/config')
 def get_config():
     """Get dashboard configuration"""

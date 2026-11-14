@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ dashboard_title }} - Live</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}">
+    <style>
+        html, body { background: transparent; margin: 0; min-height: 0; }
+        .schema-container { box-sizing: border-box; max-width: none; box-shadow: none; padding: 8px; }
+    </style>
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+</head>
+<body>
+    <div class="schema-container" id="schema-container">
+        {% if schema %}
+        <svg id="schema-svg" class="schema-svg" role="img" aria-label="Live systemschema"></svg>
+        <script id="schema-layout" type="application/json">{{ schema|tojson }}</script>
+        {% else %}
+        <div>Inget schema definierat</div>
+        {% endif %}
+    </div>
+
+    <script src="{{ url_for('static', filename='js/schema.js') }}"></script>
+    <script>
+        // Server keeps new clients on 24h, so graph_update pushes arrive without change_time_range
+        const RANGE = '24h';
+        let status = null;
+
+        function apply(data) {
+            if (!data || !data.status) return;
+            status = data.status;
+            if (window.updateSchema) window.updateSchema(status.latest);
+            checkStale();
+        }
+
+        function checkStale() {
+            if (!status) return;
+            const t = status.data_time ? new Date(status.data_time).getTime() : 0;
+            const stale = (Date.now() - t) / 1000 > (status.stale_after_seconds || 120);
+            document.getElementById('schema-container').classList.toggle('schema-stale', stale);
+        }
+        setInterval(checkStale, 15000);
+
+        fetch(`/api/initial-data?range=${RANGE}`).then(r => r.json()).then(apply).catch(console.error);
+
+        const socket = io(window.location.origin, { reconnection: true, reconnectionDelay: 1000 });
+        let hasConnected = false;
+        socket.on('connect', () => {
+            if (hasConnected) socket.emit('request_update', { range: RANGE });
+            hasConnected = true;
+        });
+        socket.on('graph_update', data => {
+            if (!data.time_range || data.time_range === RANGE) apply(data);
+        });
+    </script>
+</body>
+</html>
